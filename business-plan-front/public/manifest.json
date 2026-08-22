@@ -1,0 +1,26 @@
+{
+  "name": "BusinessPlan AIDES",
+  "short_name": "BP AIDES",
+  "description": "Outil de création de business plan professionnel — AIDES Madagascar",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e2433",
+  "theme_color": "#3a7d2e",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "lang": "fr"
+}

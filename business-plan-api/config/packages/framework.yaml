@@ -1,0 +1,15 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    http_method_override: true
+
+    # Serializer
+    serializer:
+        enabled: true
+        enable_attributes: true
+
+    # Validator
+    validation:
+        email_validation_mode: html5
+
+    # Cache
+    cache: ~

@@ -1,0 +1,8 @@
+# symfony/mailer n'est pas encore installé.
+# Pour activer l'envoi d'emails, exécutez :
+#   composer require symfony/mailer
+# Puis décommentez les lignes ci-dessous :
+#
+# framework:
+#     mailer:
+#         dsn: '%env(MAILER_DSN)%'

@@ -1,0 +1,21 @@
+services:
+    # Autowiring activé pour tous les services dans src/
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    # Enregistrement automatique de toutes les classes dans src/
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/Kernel.php'
+            - '../src/Manager/User/SendInvitationManager.php'
+            - '../src/Controller/User/SendInvitationController.php'
+            - '../src/Controller/User/CompleteRegistrationController.php'
+
+    # Listener JWT — vérifie isActive à chaque requête authentifiée
+    App\EventListener\JwtAuthListener:
+        tags:
+            - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_decoded, method: onJwtDecoded }

@@ -1,0 +1,54 @@
+/.phpunit.cache
+/var/
+/vendor/
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/jwt/
+/public/bundles/
+phpunit.xml
+
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+###> lexik/jwt-authentication-bundle ###
+/config/jwt/*.pem
+###< lexik/jwt-authentication-bundle ###
+
+# Dependencies
+/vendor/
+
+# Symfony cache
+/var/cache/
+/var/log/
+/var/sessions/
+
+# Symfony environment files
+/.env
+/.env.local
+/.env.*.local
+
+# Symfony secrets
+/config/secrets/*/*
+
+# PHPUnit
+.phpunit.result.cache
+
+# Symfony profiler
+/web/bundles/
+
+# Doctrine
+.php_cs.cache
+
+# PHPStan
+.phpstan.cache
+
+# Symfony UX / AssetMapper
+/public/assets/

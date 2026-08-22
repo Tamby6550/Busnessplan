@@ -1,0 +1,90 @@
+/**
+ * Système de rôles et permissions
+ * ─────────────────────────────────
+ * 5 rôles, du plus au moins privilégié :
+ *   admin    → accès total + gestion des utilisateurs
+ *   manager  → voit tout, modifie tout, valide les données
+ *   editor   → voit tout, modifie uniquement les non-validées
+ *   viewer   → voit tout, aucune modification
+ *   standard → ses propres données non validées seulement
+ */
+
+export type UserRole = 'admin' | 'manager' | 'editor' | 'viewer' | 'standard'
+
+// ─── Labels affichés dans l'interface ─────────────────────────────────────────
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin:    'Administrateur',
+  manager:  'Manager',
+  editor:   'Éditeur',
+  viewer:   'Lecteur',
+  standard: 'Standard',
+}
+
+// ─── Descriptions courtes (pour les non-techniciens) ──────────────────────────
+
+export const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
+  admin:    'Accès complet, peut aussi créer et gérer les comptes utilisateurs.',
+  manager:  'Voit toutes les données, peut modifier et valider les business plans.',
+  editor:   'Voit toutes les données, peut modifier uniquement les business plans non encore validés.',
+  viewer:   'Voit toutes les données (y compris les validées) mais ne peut rien modifier.',
+  standard: "Peut créer son propre business plan et le modifier tant qu'il n'est pas validé.",
+}
+
+// ─── Icônes associées ─────────────────────────────────────────────────────────
+
+export const ROLE_ICONS: Record<UserRole, string> = {
+  admin:    'fa-shield-alt',
+  manager:  'fa-user-tie',
+  editor:   'fa-pen',
+  viewer:   'fa-eye',
+  standard: 'fa-user',
+}
+
+// ─── Couleurs badge ───────────────────────────────────────────────────────────
+
+export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
+  admin:    { bg: '#fef3c7', text: '#92400e' },
+  manager:  { bg: '#ede9fe', text: '#5b21b6' },
+  editor:   { bg: '#dbeafe', text: '#1e40af' },
+  viewer:   { bg: '#dcfce7', text: '#166534' },
+  standard: { bg: '#f1f5f9', text: '#475569' },
+}
+
+// ─── Fonctions de permission ──────────────────────────────────────────────────
+
+/** Peut voir toutes les données (validées et non validées de tous les utilisateurs) */
+export function canSeeAll(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager' || role === 'editor' || role === 'viewer'
+}
+
+/** Peut modifier les business plans non validés (des autres aussi) */
+export function canEditNonValidated(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager' || role === 'editor'
+}
+
+/** Peut modifier les business plans déjà validés */
+export function canEditValidated(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager'
+}
+
+/** Peut valider / dévalider un business plan */
+export function canValidate(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager'
+}
+
+/** Peut accéder à la gestion des utilisateurs */
+export function canManageUsers(role: UserRole): boolean {
+  return role === 'admin'
+}
+
+/** Peut exporter les données (PDF, Excel…) */
+export function canExport(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager'
+}
+
+/** Valeur par défaut si le rôle reçu du backend est inconnu */
+export function safeRole(role: string | undefined | null): UserRole {
+  const valid: UserRole[] = ['admin', 'manager', 'editor', 'viewer', 'standard']
+  return valid.includes(role as UserRole) ? (role as UserRole) : 'standard'
+}

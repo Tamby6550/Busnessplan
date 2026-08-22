@@ -1,0 +1,11 @@
+RewriteEngine On
+RewriteBase /
+
+# Servir les fichiers statiques existants directement
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# Tout le reste → Symfony (business-plan-api/public/)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ business-plan-api/public/$1 [L]

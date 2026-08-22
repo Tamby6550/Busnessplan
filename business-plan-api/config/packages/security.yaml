@@ -1,0 +1,60 @@
+security:
+    # Encodage des mots de passe
+    password_hashers:
+        App\Entity\User:
+            algorithm: bcrypt
+            cost: 13
+
+    # Provider : chargement de l'utilisateur par email
+    providers:
+        app_user_provider:
+            entity:
+                class: App\Entity\User
+                property: email
+
+    firewalls:
+        # Routes de développement — sans protection
+        dev:
+            pattern: ^/(_(profiler|wdt)|css|images|js)/
+            security: false
+
+        # Export Excel serveur pour Power Query (KoboToolBox-like) : authentification
+        # Basic (identifiants BusinessPlanA habituels) au lieu du JWT, car Power Query
+        # "Obtenir des données → À partir du Web" avec type d'authentification "Basic"
+        # envoie l'en-tête Authorization à chaque requête sans étape de login séparée.
+        # DOIT rester déclaré AVANT le firewall "main" : Symfony évalue les firewalls
+        # dans l'ordre et retient le premier pattern qui correspond.
+        export:
+            pattern: ^/api/export
+            stateless: true
+            provider: app_user_provider
+            user_checker: App\Security\UserChecker
+            http_basic: ~
+
+        # Firewall unique pour le reste de l'API (recommandé par Lexik JWT)
+        main:
+            pattern: ^/api
+            stateless: true
+            provider: app_user_provider
+            user_checker: App\Security\UserChecker
+            json_login:
+                check_path: /api/auth/login
+                username_path: username
+                password_path: password
+                success_handler: lexik_jwt_authentication.handler.authentication_success
+                failure_handler: lexik_jwt_authentication.handler.authentication_failure
+            jwt: ~
+
+    access_control:
+        - { path: ^/api/auth/login,      roles: PUBLIC_ACCESS }
+        - { path: ^/api/users/register,  roles: PUBLIC_ACCESS }
+        - { path: ^/api,                 roles: IS_AUTHENTICATED_FULLY }
+
+when@test:
+    security:
+        password_hashers:
+            Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface:
+                algorithm: auto
+                cost: 4
+                time_cost: 3
+                memory_cost: 10

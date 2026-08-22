@@ -1,0 +1,42 @@
+# Use the front controller as index file. It serves as a fallback solution when
+# every other rewrite/redirect fails (e.g. in an aliased environment without
+# mod_rewrite). Additionally, this reduces the matching process for the
+# start page (path "/") because otherwise Apache will apply the rewriting rules
+# to each configured DirectoryIndex file (e.g. index.php, index.html, index.pl).
+DirectoryIndex index.php
+
+# By default, Apache does not evaluate symbolic links if you did not enable this
+# temporary workaround for known edge-cases. This can lead to unexpected 404 responses.
+# Options +FollowSymlinks
+
+# Disabling MultiViews prevents unwanted negotiation, e.g. "/index" would map to
+# "/index.php" etc.
+Options -MultiViews
+
+RewriteEngine On
+
+# Determine the RewriteBase automatically and set it as environment variable.
+# If you are using Apache aliases or not running this in the root directory of
+# the server, adapt this.
+RewriteCond %{REQUEST_URI}::$0 ^(/.+)/(.*)::\2$
+RewriteRule .* - [E=BASE:%1]
+
+# Sets the HTTP_AUTHORIZATION header removed by Apache
+RewriteCond %{HTTP:Authorization} .+
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%0]
+
+# Redirect to URI without front controller to prevent duplicate content
+# (with and without `/index.php`). Only do this redirect on the initial
+# rewrite by Apache and not on subsequent cycles. Otherwise we would get an
+# endless redirect loop (request -> rewrite to front controller ->
+# redirect -> request -> ...).
+# So in case you get a redirect loop, comment out these 8 lines or replace
+# `L` with `END`.
+RewriteCond %{ENV:REDIRECT_STATUS} =""
+RewriteRule ^index\.php(?:/(.*)|$) %{ENV:BASE}/$1 [R=301,L]
+
+# If the requested filename exists, simply serve it.
+# We only want to let Apache serve files and not directories.
+# Rewrite all other queries to the front controller.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ %{ENV:BASE}/index.php [L]
