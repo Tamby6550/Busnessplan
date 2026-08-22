@@ -10,6 +10,8 @@ dist/
 build/
 out/
 /.zip
+dev-dist/
+
 # Environment variables
 .env
 .env.local
