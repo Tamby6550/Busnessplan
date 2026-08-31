@@ -16,7 +16,7 @@ class CreateInvestmentTerrainManager
     ) {}
 
     /**
-     * @param array{name: string, amount?: int} $data
+     * @param array{name: string, amount?: int, natureType?: string} $data
      */
     public function create(Company $company, User $modifiedBy, array $data = []): InvestmentTerrain
     {
@@ -27,6 +27,7 @@ class CreateInvestmentTerrainManager
         $investment->setCompany($company);
         $investment->setName($data['name'] ?? 'Terrain');
         $investment->setAmount((int) ($data['amount'] ?? 0));
+        $investment->setNatureType((string) ($data['natureType'] ?? 'physique'));
         $investment->setSortOrder($nextOrder);
         $company->setLastModifiedBy($modifiedBy);
 

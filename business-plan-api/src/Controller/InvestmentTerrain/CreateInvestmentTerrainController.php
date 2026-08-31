@@ -45,15 +45,17 @@ class CreateInvestmentTerrainController extends AbstractController
         }
 
         $investment = $this->createInvestmentTerrainManager->create($company, $user, [
-            'name'   => $name,
-            'amount' => $body['amount'] ?? 0,
+            'name'       => $name,
+            'amount'     => $body['amount'] ?? 0,
+            'natureType' => $body['natureType'] ?? 'physique',
         ]);
 
         return $this->json([
-            'id'        => $investment->getId(),
-            'name'      => $investment->getName(),
-            'amount'    => $investment->getAmount(),
-            'sortOrder' => $investment->getSortOrder(),
+            'id'         => $investment->getId(),
+            'name'       => $investment->getName(),
+            'amount'     => $investment->getAmount(),
+            'natureType' => $investment->getNatureType(),
+            'sortOrder'  => $investment->getSortOrder(),
         ], Response::HTTP_CREATED);
     }
 }

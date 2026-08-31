@@ -9,9 +9,6 @@ import HelpButton from '@/components/ui/HelpButton'
 
 interface PctRow { equity: number; grant: number; loan: number }
 
-type ContribType = 'nature' | 'financier'
-type EquipType   = 'electrique' | 'non_electrique'
-
 /** Arrondi à 1 décimale pour éviter 67.5 → 68 → 101% total */
 const round1 = (n: number) => Math.round(n * 10) / 10
 
@@ -22,10 +19,6 @@ function initPct(inv: Investment): PctRow {
     grant:  round1((inv.financedGrant  / inv.amount) * 100),
     loan:   round1((inv.financedLoan   / inv.amount) * 100),
   }
-}
-
-function initContribType(inv: Investment): ContribType {
-  return inv.contributionType === 'nature' ? 'nature' : 'financier'
 }
 
 export default function InvestmentsSection() {
@@ -40,7 +33,6 @@ export default function InvestmentsSection() {
 
   const [newName, setNewName]   = useState('')
   const [isAdding, setIsAdding] = useState(false)
-  // Mode de saisie global : 'pct' = pourcentage, 'amount' = montant
   const [inputMode, setInputMode] = useState<'pct' | 'amount'>('pct')
 
   const [newTerrainName, setNewTerrainName] = useState('')
@@ -49,7 +41,7 @@ export default function InvestmentsSection() {
   const [isSaving, setIsSaving] = useState(false)
   const [saved, setSaved]       = useState(false)
   const [toast, setToast]       = useState<string | null>(null)
-  const arrayRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const arrayRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({})
 
   const [pcts, setPcts] = useState<Record<number, PctRow>>(() => {
     const map: Record<number, PctRow> = {}
@@ -57,19 +49,17 @@ export default function InvestmentsSection() {
     return map
   })
 
-  // Montants financés en mode saisie Ar — mis à jour via handleAmount / handleFinancedAmount
+  const [contribTypes, setContribTypes] = useState<Record<number, 'nature' | 'financier'>>(() => {
+    const map: Record<number, 'nature' | 'financier'> = {}
+    company.investments.forEach((inv) => { map[inv.id] = inv.contributionType })
+    return map
+  })
+
   const [amounts, setAmounts] = useState<Record<number, { equity: number; grant: number; loan: number }>>(() => {
     const map: Record<number, { equity: number; grant: number; loan: number }> = {}
     company.investments.forEach((inv) => {
       map[inv.id] = { equity: inv.financedEquity, grant: inv.financedGrant, loan: inv.financedLoan }
     })
-    return map
-  })
-
-  // Nature de l'apport en fonds propres par investissement : 'nature' (100%, verrouillé) ou 'financier' (0-99%)
-  const [contribTypes, setContribTypes] = useState<Record<number, ContribType>>(() => {
-    const map: Record<number, ContribType> = {}
-    company.investments.forEach((inv) => { map[inv.id] = initContribType(inv) })
     return map
   })
 
@@ -91,50 +81,27 @@ export default function InvestmentsSection() {
     setContribTypes((prev) => {
       const next = { ...prev }
       company.investments.forEach((inv) => {
-        if (!next[inv.id]) next[inv.id] = initContribType(inv)
+        if (!next[inv.id]) next[inv.id] = inv.contributionType
       })
       return next
     })
   }, [company.investments])
 
-  // Bascule apport en nature / apport financier pour une ligne.
-  // Nature => Fonds propres verrouillé à 100%, Subvention et Emprunt verrouillés à 0%.
-  // Financier => déverrouille les 3 champs ; si l'ancienne valeur était 100% (venant de "nature"),
-  // on la ramène à 99% (le max autorisé en apport financier) et le 1% libéré part sur l'emprunt.
-  function handleContribTypeChange(inv: Investment, type: ContribType) {
-    setContribTypes((prev) => ({ ...prev, [inv.id]: type }))
-
-    if (type === 'nature') {
+  function handleContributionType(inv: Investment, value: 'nature' | 'financier') {
+    setContribTypes((prev) => ({ ...prev, [inv.id]: value }))
+    if (value === 'nature') {
       setPcts((prev) => ({ ...prev, [inv.id]: { equity: 100, grant: 0, loan: 0 } }))
       setAmounts((prev) => ({ ...prev, [inv.id]: { equity: inv.amount, grant: 0, loan: 0 } }))
-      return
     }
-
-    setPcts((prev) => {
-      const cur = prev[inv.id] ?? { equity: 0, grant: 0, loan: 0 }
-      if (cur.equity < 100) return prev
-      const freed = round1(cur.equity - 99)
-      return { ...prev, [inv.id]: { ...cur, equity: 99, loan: round1(cur.loan + freed) } }
-    })
-    setAmounts((prev) => {
-      const cur = prev[inv.id] ?? { equity: 0, grant: 0, loan: 0 }
-      if (inv.amount <= 0 || cur.equity < inv.amount) return prev
-      const newEquity = Math.floor(inv.amount * 0.99)
-      const freed = cur.equity - newEquity
-      return { ...prev, [inv.id]: { ...cur, equity: newEquity, loan: cur.loan + freed } }
-    })
   }
 
   async function handleAdd() {
     if (!newName.trim()) return
     setIsAdding(true)
     try {
-      // Par défaut : apport en nature à 100% (le cas le plus simple), l'utilisateur bascule
-      // en "apport financier" s'il veut répartir entre fonds propres / subvention / emprunt.
-      const inv = await offlineInvestmentApi.create(company.id, { name: newName.trim(), contributionType: 'nature' })
+      const inv = await offlineInvestmentApi.create(company.id, { name: newName.trim() })
       addInvestment(inv)
       setPcts((prev) => ({ ...prev, [inv.id]: { equity: 100, grant: 0, loan: 0 } }))
-      setContribTypes((prev) => ({ ...prev, [inv.id]: initContribType(inv) }))
       setNewName('')
     } finally {
       setIsAdding(false)
@@ -200,16 +167,15 @@ export default function InvestmentsSection() {
         const name      = arrayRefs.current[`${inv.id}-name`]?.value?.trim() || inv.name
         const amount    = parseFormattedNum(arrayRefs.current[`${inv.id}-amount`]?.value || '0') || inv.amount
         const usefulLife = parseInt(arrayRefs.current[`${inv.id}-life`]?.value || '', 10) || inv.usefulLife
+        const equipmentType = (arrayRefs.current[`${inv.id}-equipmentType`]?.value as 'electrique' | 'non_electrique' | '' | undefined)
+        const contributionType = contribTypes[inv.id] ?? inv.contributionType
         const loanRate  = parseFloat(arrayRefs.current[`${inv.id}-rate`]?.value || '') || 0
         const loanYears = parseInt(arrayRefs.current[`${inv.id}-years`]?.value || '', 10) || inv.loanYears
-        const equipmentType = (arrayRefs.current[`${inv.id}-equipmentType`]?.value as EquipType) || 'non_electrique'
-        const contributionType: ContribType = contribTypes[inv.id] ?? 'financier'
 
         const p = pcts[inv.id] ?? { equity: 100, grant: 0, loan: 0 }
         const a = amounts[inv.id] ?? { equity: inv.financedEquity, grant: inv.financedGrant, loan: inv.financedLoan }
         let financedEquity: number, financedGrant: number, financedLoan: number
         if (contributionType === 'nature') {
-          // Apport en nature : toujours 100% fonds propres, aucune subvention ni emprunt.
           financedEquity = amount
           financedGrant  = 0
           financedLoan   = 0
@@ -223,8 +189,8 @@ export default function InvestmentsSection() {
           financedLoan   = amount - financedEquity - financedGrant
         }
         const updated = await offlineInvestmentApi.update(inv.id, company.id, {
-          name, amount, usefulLife, loanRate, loanYears,
-          equipmentType, financedEquity, financedGrant, financedLoan, contributionType,
+          name, amount, usefulLife, equipmentType: equipmentType || null, contributionType, loanRate, loanYears,
+          financedEquity, financedGrant, financedLoan,
         })
         updateInvestment(inv.id, updated)
       }
@@ -232,7 +198,8 @@ export default function InvestmentsSection() {
       for (const terr of useCompanyStore.getState().company?.investmentTerrains ?? []) {
         const name   = arrayRefs.current[`t${terr.id}-name`]?.value?.trim() || terr.name
         const amount = parseFormattedNum(arrayRefs.current[`t${terr.id}-amount`]?.value || '0')
-        const updated = await offlineInvestmentTerrainApi.update(terr.id, company.id, { name, amount })
+        const natureType = (arrayRefs.current[`t${terr.id}-nature`]?.value as 'immateriel' | 'physique' | undefined) || terr.natureType
+        const updated = await offlineInvestmentTerrainApi.update(terr.id, company.id, { name, amount, natureType })
         updateInvestmentTerrain(terr.id, updated)
       }
       setSaved(true)
@@ -292,7 +259,7 @@ export default function InvestmentsSection() {
           </div>
           <HelpButton
             title="Investissements & Financement"
-            content={"Déclarez vos immobilisations et leur plan de financement.\n\n=> Montant : Coût total de l'investissement.\n\n=> Type d'équipement : Électrique ou non électrique (informatif).\n\n=> Mode % : Saisissez le pourcentage, le montant est calculé automatiquement.\n=> Mode Ar : Saisissez le montant directement, le % est calculé automatiquement.\n\n=> Fonds propres : choisissez \"Apport en nature\" (bien déjà possédé, toujours 100 %, aucune subvention ni emprunt) ou \"Apport financier\" (apport en espèces, de 0 à 99 %, le reste financé par subvention/emprunt).\n\n=> La somme des 3 pourcentages doit être égale à 100 %.\n\n=> Taux et durée d'emprunt : S'appliquent uniquement à la part financée par emprunt."}
+            content={"Déclarez vos immobilisations et leur plan de financement.\n\n=> Montant : Coût total de l'investissement.\n\n=> Mode % : Saisissez le pourcentage, le montant est calculé automatiquement.\n=> Mode Ar : Saisissez le montant directement, le % est calculé automatiquement.\n\n=> La somme des 3 pourcentages doit être égale à 100 %.\n\n=> Taux et durée d'emprunt : S'appliquent uniquement à la part financée par emprunt."}
           />
         </div>
       </div>
@@ -382,9 +349,6 @@ export default function InvestmentsSection() {
         </div>
       )}
 
-      {/* ── Investissement Terrain : juste désignation + montant, placé avant
-          l'investissement général car il n'y en a pas beaucoup. Aucun lien
-          avec la trésorerie (pas de calcul, pas d'amortissement). ── */}
       <h4 style={{ margin: '0 0 var(--space-3)', fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--color-text)' }}>
         Investissement non amortissables
       </h4>
@@ -414,6 +378,7 @@ export default function InvestmentsSection() {
               <thead>
                 <tr>
                   <th>Désignation (Terrain)</th>
+                  <th style={{ textAlign: 'center' }}>Nature</th>
                   <th style={{ textAlign: 'right' }}>Montant (Ar)</th>
                   <th />
                 </tr>
@@ -427,6 +392,16 @@ export default function InvestmentsSection() {
                       <input className="editable-cell" style={{ width: '100%', minWidth: 160 }}
                         defaultValue={inv.name}
                         ref={(el) => { arrayRefs.current[`t${inv.id}-name`] = el }} />
+                    </td>
+
+                    {/* Nature : immatériel / physique */}
+                    <td style={{ textAlign: 'center' }}>
+                      <select className="editable-cell" style={{ width: 110 }}
+                        defaultValue={inv.natureType ?? 'physique'}
+                        ref={(el) => { arrayRefs.current[`t${inv.id}-nature`] = el }}>
+                        <option value="physique">Physique</option>
+                        <option value="immateriel">Immatériel</option>
+                      </select>
                     </td>
 
                     {/* Montant */}
@@ -448,6 +423,7 @@ export default function InvestmentsSection() {
               <tfoot>
                 <tr>
                   <td style={{ fontWeight: 600 }}>Total</td>
+                  <td />
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatAriary(totalInvestTerrain)}</td>
                   <td />
                 </tr>
@@ -519,8 +495,9 @@ export default function InvestmentsSection() {
                   <th>Désignation</th>
                   <th style={{ textAlign: 'right' }}>Montant (Ar)</th>
                   <th style={{ textAlign: 'right' }}>Durée amort.</th>
-                  <th style={{ textAlign: 'left', minWidth: 130 }}>Type d'équipement</th>
-                  <th style={{ textAlign: 'right', minWidth: 150 }}>
+                  <th style={{ textAlign: 'center' }}>Type d'équipement</th>
+                  <th style={{ textAlign: 'center' }}>Type d'apport</th>
+                  <th style={{ textAlign: 'right' }}>
                     Fonds propres
                     <span style={styles.modeTag}>{inputMode === 'pct' ? '%' : 'Ar'}</span>
                   </th>
@@ -540,10 +517,8 @@ export default function InvestmentsSection() {
               </thead>
               <tbody>
                 {company.investments.map((inv) => {
-                  const p           = pcts[inv.id] ?? { equity: 0, grant: 0, loan: 0 }
-                  const contribType = contribTypes[inv.id] ?? 'financier'
-                  const isNature    = contribType === 'nature'
-                  const ok          = isRowOk(inv)
+                  const p    = pcts[inv.id] ?? { equity: 0, grant: 0, loan: 0 }
+                  const ok   = isRowOk(inv)
 
                   return (
                     <tr key={inv.id} style={{ background: !ok ? '#fff5f5' : undefined }}>
@@ -570,68 +545,63 @@ export default function InvestmentsSection() {
                           ref={(el) => { arrayRefs.current[`${inv.id}-life`] = el }} />
                       </td>
 
-                      {/* Type d'équipement — informatif */}
-                      <td>
-                        <select className="editable-cell" style={{ width: '100%', minWidth: 120 }}
-                          defaultValue={inv.equipmentType ?? 'non_electrique'}
-                          ref={(el) => { arrayRefs.current[`${inv.id}-equipmentType`] = el as unknown as HTMLInputElement }}>
-                          <option value="non_electrique">Non électrique</option>
+                      {/* Type d'équipement */}
+                      <td style={{ textAlign: 'center' }}>
+                        <select className="editable-cell" style={{ width: 130 }}
+                          defaultValue={inv.equipmentType ?? ''}
+                          ref={(el) => { arrayRefs.current[`${inv.id}-equipmentType`] = el }}>
+                          <option value="">—</option>
                           <option value="electrique">Électrique</option>
+                          <option value="non_electrique">Non électrique</option>
                         </select>
                       </td>
 
-                      {/* Fonds propres — apport en nature (100%, verrouillé) ou apport financier (0-99%) */}
-                      <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                          <select
-                            value={contribType}
-                            onChange={(e) => handleContribTypeChange(inv, e.target.value as ContribType)}
-                            style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
-                          >
-                            <option value="nature">Apport en nature</option>
-                            <option value="financier">Apport financier</option>
-                          </select>
-                          {isNature ? (
-                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-muted)' }}>
-                              100 % <span style={{ fontWeight: 600, fontSize: 11 }}>({formatAriary(inv.amount)})</span>
-                            </div>
-                          ) : (
-                            <FinancingCell
-                              mode={inputMode}
-                              pct={p.equity}
-                              maxPct={99}
-                              amount={inv.financedEquity}
-                              totalAmount={inv.amount}
-                              onPctBlur={(v) => handlePct(inv, 'equity', v)}
-                              onPctChange={(v) => setPcts((prev) => ({ ...prev, [inv.id]: { ...p, equity: v } }))}
-                              onAmountBlur={(v) => handleFinancedAmount(inv, 'equity', v)}
-                            />
-                          )}
-                        </div>
+                      {/* Type d'apport : nature / financier */}
+                      <td style={{ textAlign: 'center' }}>
+                        <select className="editable-cell" style={{ width: 130 }}
+                          value={contribTypes[inv.id] ?? inv.contributionType}
+                          onChange={(e) => handleContributionType(inv, e.target.value as 'nature' | 'financier')}>
+                          <option value="financier">Apport financier</option>
+                          <option value="nature">Apport en nature</option>
+                        </select>
                       </td>
 
-                      {/* Subvention — verrouillée à 0 si apport en nature */}
+                      {/* Fonds propres */}
+                      <td style={{ textAlign: 'right' }}>
+                        <FinancingCell
+                          mode={inputMode}
+                          pct={p.equity}
+                          amount={inv.financedEquity}
+                          totalAmount={inv.amount}
+                          disabled={contribTypes[inv.id] === 'nature'}
+                          onPctBlur={(v) => handlePct(inv, 'equity', v)}
+                          onPctChange={(v) => setPcts((prev) => ({ ...prev, [inv.id]: { ...p, equity: v } }))}
+                          onAmountBlur={(v) => handleFinancedAmount(inv, 'equity', v)}
+                        />
+                      </td>
+
+                      {/* Subvention */}
                       <td style={{ textAlign: 'right' }}>
                         <FinancingCell
                           mode={inputMode}
                           pct={p.grant}
                           amount={inv.financedGrant}
                           totalAmount={inv.amount}
-                          locked={isNature}
+                          disabled={contribTypes[inv.id] === 'nature'}
                           onPctBlur={(v) => handlePct(inv, 'grant', v)}
                           onPctChange={(v) => setPcts((prev) => ({ ...prev, [inv.id]: { ...p, grant: v } }))}
                           onAmountBlur={(v) => handleFinancedAmount(inv, 'grant', v)}
                         />
                       </td>
 
-                      {/* Emprunt — verrouillé à 0 si apport en nature */}
+                      {/* Emprunt */}
                       <td style={{ textAlign: 'right' }}>
                         <FinancingCell
                           mode={inputMode}
                           pct={p.loan}
                           amount={inv.financedLoan}
                           totalAmount={inv.amount}
-                          locked={isNature}
+                          disabled={contribTypes[inv.id] === 'nature'}
                           onPctBlur={(v) => handlePct(inv, 'loan', v)}
                           onPctChange={(v) => setPcts((prev) => ({ ...prev, [inv.id]: { ...p, loan: v } }))}
                           onAmountBlur={(v) => handleFinancedAmount(inv, 'loan', v)}
@@ -674,7 +644,7 @@ export default function InvestmentsSection() {
                   <td style={{ fontWeight: 600 }}>Total</td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatAriary(totalInvest)}</td>
                   <td />
-                  <td />
+                  <td /><td />
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ fontWeight: 700 }}>{formatAriary(totalEquity)}</div>
                     <div style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}>{pctOf(totalEquity)} %</div>
@@ -777,40 +747,27 @@ export default function InvestmentsSection() {
   )
 }
 
-// ── Cellule de financement (fonds propres / subvention / emprunt) ──────────────
 interface FinancingCellProps {
   mode: 'pct' | 'amount'
   pct: number
   amount: number
   totalAmount: number
-  maxPct?: number     // plafond du % saisissable (99 pour Fonds propres en apport financier)
-  locked?: boolean    // verrouillé à 0 (Subvention/Emprunt quand l'investissement est en apport en nature)
+  disabled?: boolean
   onPctChange: (v: number) => void
   onPctBlur: (v: number) => void
   onAmountBlur: (v: number) => void
 }
 
-function FinancingCell({ mode, pct, amount, totalAmount, maxPct = 100, locked = false, onPctChange, onPctBlur, onAmountBlur }: FinancingCellProps) {
+function FinancingCell({ mode, pct, amount, totalAmount, disabled, onPctChange, onPctBlur, onAmountBlur }: FinancingCellProps) {
   const [localPct, setLocalPct] = useState(String(pct))
   const prevPct = useRef(pct)
 
-  // Synchronise si la valeur change de l'extérieur (ex: changement du montant total)
   useEffect(() => {
     if (pct !== prevPct.current) {
       prevPct.current = pct
       setLocalPct(String(pct))
     }
   }, [pct])
-
-  if (locked) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, opacity: 0.55 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-muted)' }}>
-          {mode === 'pct' ? '0 %' : formatAriary(0)}
-        </div>
-      </div>
-    )
-  }
 
   if (mode === 'pct') {
     const numericPct = parseFloat(localPct) || 0
@@ -820,14 +777,15 @@ function FinancingCell({ mode, pct, amount, totalAmount, maxPct = 100, locked = 
           <input
             type="number" className="editable-cell"
             style={{ width: 70, textAlign: 'right' }}
-            value={localPct} min={0} max={maxPct} step={0.1}
+            value={localPct} min={0} max={100} step={0.1}
+            disabled={disabled}
             onChange={(e) => {
               setLocalPct(e.target.value)
-              const v = Math.min(maxPct, Math.max(0, parseFloat(e.target.value) || 0))
+              const v = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
               onPctChange(v)
             }}
             onBlur={(e) => {
-              const v = Math.min(maxPct, Math.max(0, parseFloat(e.target.value) || 0))
+              const v = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
               setLocalPct(String(v))
               prevPct.current = v
               onPctBlur(v)
@@ -843,14 +801,14 @@ function FinancingCell({ mode, pct, amount, totalAmount, maxPct = 100, locked = 
   }
 
   // Mode Ar
-  const maxAmount = totalAmount > 0 ? Math.floor(totalAmount * maxPct / 100) : undefined
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
       <NumInput
         className="editable-cell"
         style={{ width: 110, textAlign: 'right' }}
         defaultValue={amount} min={0}
-        onBlur={(v) => onAmountBlur(maxAmount !== undefined ? Math.min(v, maxAmount) : v)}
+        disabled={disabled}
+        onBlur={(v) => onAmountBlur(v)}
       />
       <div style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}>
         {totalAmount > 0 ? `${round1((amount / totalAmount) * 100)} %` : '0 %'}

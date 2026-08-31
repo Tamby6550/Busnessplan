@@ -19,16 +19,19 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  * où 'result' est la sortie de FinancialCalculationService::computeAll().
  *
  * Produit un classeur PhpSpreadsheet à 14 feuilles, avec EXACTEMENT la même
- * structure, les mêmes en-têtes et les mêmes conventions de mise en forme que
- * l'export Excel du navigateur : colonnes en "blocs" par élément (slot) pour
- * les catégories à nombre variable d'éléments par entreprise (produits,
- * matières, personnel, charges, investissements, emprunts), séries multi-
- * années au format texte "(v1, v2, v3, v4, v5)", alignement centré pour les
- * colonnes libellé/quantité/série, gauche pour Promoteur/Entreprise.
+ * structure et les mêmes conventions de mise en forme que l'export Excel du
+ * navigateur : pour les catégories à nombre variable d'éléments par entreprise
+ * (produits, matières, personnel, charges, investissements, emprunts), une ligne
+ * par élément (et non plus un bloc de colonnes par élément), avec les colonnes
+ * de totaux au niveau entreprise fusionnées verticalement sur le bloc de lignes
+ * de cette entreprise. Les séries mensuelles (12 valeurs) et annuelles (4 ou 5
+ * valeurs) sont éclatées en autant de colonnes individuelles (une par mois ou
+ * par année), plutôt que regroupées dans une seule cellule.
  */
 class DashboardXlsxBuilder
 {
     private const YEARS = ['An 1', 'An 2', 'An 3', 'An 4', 'An 5'];
+    private const MONTHS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
     private const DARK_BG   = '1E2433';
     private const WHITE     = 'FFFFFF';
@@ -69,16 +72,17 @@ class DashboardXlsxBuilder
         return $wb;
     }
 
-    // ─── Rendu générique d'une feuille à partir de headers/rows/widths ────────
+    // ─── Rendu générique d'une feuille à partir de headers/rows/widths/merges ─
 
     /**
-     * @param array{headers: string[], rows: array[][], widths: int[]} $spec
+     * @param array{headers: string[], rows: array[][], widths: int[], merges?: string[]} $spec
      */
     private function renderSheet(Spreadsheet $wb, string $title, array $spec): void
     {
         $headers = $spec['headers'];
         $rows = $spec['rows'];
         $widths = $spec['widths'] ?? [];
+        $merges = $spec['merges'] ?? [];
 
         $sheet = $wb->createSheet();
         $sheet->setTitle($this->safeSheetTitle($title));
@@ -108,6 +112,10 @@ class DashboardXlsxBuilder
             }
             $col = Coordinate::stringFromColumnIndex($i + 1);
             $sheet->getColumnDimension($col)->setWidth(max(6, (int) round($w / 7)));
+        }
+
+        foreach ($merges as $range) {
+            $sheet->mergeCells($range);
         }
 
         $sheet->freezePane('A2');
@@ -257,29 +265,85 @@ class DashboardXlsxBuilder
         return $s === '' || $s === '-' ? '0' : $s;
     }
 
-    /** @param (int|float)[] $values */
-    private function paren(array $values): string
+    /** @return string[] */
+    private function monthHeaders(string $prefix): array
     {
-        if (count($values) === 0) {
-            return '-';
+        return array_map(fn ($m) => "$prefix $m", self::MONTHS);
+    }
+
+    /**
+     * @param string[]|null $labels
+     * @return string[]
+     */
+    private function yearHeaders(string $prefix, ?array $labels = null): array
+    {
+        return array_map(fn ($y) => "$prefix $y", $labels ?? self::YEARS);
+    }
+
+    /**
+     * @param (int|float)[] $values
+     * @return array[]
+     */
+    private function monthCols(array $values): array
+    {
+        $out = [];
+        foreach (array_keys(self::MONTHS) as $i) {
+            $out[] = $this->c_numC((float) ($values[$i] ?? 0));
         }
-        return '(' . implode(', ', array_map(fn ($v) => $this->fmtNum((float) $v), $values)) . ')';
+        return $out;
     }
 
-    /** @param string[] $values */
-    private function joinList(array $values): string
+    /**
+     * @param (int|float)[] $values
+     * @param string[]|null $labels
+     * @return array[]
+     */
+    private function yearCols(array $values, ?array $labels = null): array
     {
-        return count($values) ? implode(', ', $values) : '';
+        $labels = $labels ?? self::YEARS;
+        $out = [];
+        foreach (array_keys($labels) as $i) {
+            $out[] = $this->c_numC((float) ($values[$i] ?? 0));
+        }
+        return $out;
     }
 
-    /** @param callable(array):array $getItems */
-    private function maxCount(array $contexts, callable $getItems): int
+    /**
+     * Construit les lignes d'une feuille "un élément par ligne" (produit, matière, poste,
+     * charge, investissement, emprunt…) : chaque élément de chaque entreprise a sa propre
+     * ligne ; les colonnes de totaux au niveau entreprise (mêmes valeurs répétées sur
+     * toutes les lignes d'une même entreprise) sont fusionnées verticalement sur le bloc
+     * de lignes de cette entreprise. Les entreprises sans aucun élément dans cette
+     * catégorie n'apparaissent pas dans la feuille.
+     *
+     * @param callable(array):array $getItems
+     * @param callable(mixed,array):array $buildRow
+     * @return array{rows: array[], merges: string[]}
+     */
+    private function buildLongFormatRows(array $contexts, callable $getItems, callable $buildRow, int $totalStartCol, int $totalColCount): array
     {
-        $m = 0;
+        $rows = [];
+        $merges = [];
+        $r = 2; // la ligne 1 est l'en-tête (convention renderSheet)
         foreach ($contexts as $ctx) {
-            $m = max($m, count($getItems($ctx)));
+            $items = $getItems($ctx);
+            if (count($items) === 0) {
+                continue;
+            }
+            $startRow = $r;
+            foreach ($items as $item) {
+                $rows[] = $buildRow($item, $ctx);
+                $r++;
+            }
+            $endRow = $r - 1;
+            if ($endRow > $startRow && $totalColCount > 0) {
+                for ($c = 0; $c < $totalColCount; $c++) {
+                    $col = Coordinate::stringFromColumnIndex($totalStartCol + $c + 1);
+                    $merges[] = "{$col}{$startRow}:{$col}{$endRow}";
+                }
+            }
         }
-        return $m;
+        return ['rows' => $rows, 'merges' => $merges];
     }
 
     // ─── Feuille 1 : Récapitulatif (une ligne par entreprise) ──────────────────
@@ -348,432 +412,373 @@ class DashboardXlsxBuilder
         return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
     }
 
-    // ─── Feuille 2 : Produits (une ligne par entreprise, un groupe de colonnes par produit) ─
+    // ─── Feuille 2 : Produits (une ligne par produit, totaux entreprise fusionnés) ─
 
     private function buildProduitsSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getProducts()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb produits', 'Produits (noms)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Prix mensuels Ar (Produit $n)";
-            $headers[] = "Quantités mensuelles (Produit $n)";
-            $headers[] = "Croissance annuelle % An2-5 (Produit $n)";
-            $headers[] = "Chiffre d'affaires An1-5 Ar (Produit $n)";
-        }
-        foreach (self::YEARS as $y) {
-            $headers[] = "CA total $y (Ar)";
-        }
+        $headers = array_merge(
+            ['id', 'Promoteur', 'Entreprise', 'Produits (noms)'],
+            $this->monthHeaders('Prix Ar'),
+            $this->monthHeaders('Qté'),
+            $this->yearHeaders('Croissance %', array_slice(self::YEARS, 1)),
+            $this->yearHeaders('CA Ar'),
+            array_map(fn ($y) => "CA total $y (Ar)", self::YEARS),
+        );
+        $totalColCount = 5;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $products = $company->getProducts()->toArray();
-
-            $totalByYear = [];
-            for ($y = 0; $y < 5; $y++) {
-                $sum = 0;
-                foreach ($products as $p) {
-                    $sum += $this->calc->productRevenueByYear($p, $y);
-                }
-                $totalByYear[] = $sum;
-            }
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($products)),
-                $this->c_lblC($this->joinList(array_map(fn ($p) => $p->getName(), $products))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $p = $products[$i] ?? null;
-                if (!$p) {
-                    for ($k = 0; $k < 4; $k++) {
-                        $row[] = $this->c_lblC('-');
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getProducts()->toArray(),
+            function ($p, $ctx) {
+                $products = $ctx['company']->getProducts()->toArray();
+                $totalByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $sum = 0;
+                    foreach ($products as $pp) {
+                        $sum += $this->calc->productRevenueByYear($pp, $y);
                     }
-                    continue;
+                    $totalByYear[] = $sum;
                 }
                 $revByYear = [];
                 for ($y = 0; $y < 5; $y++) {
                     $revByYear[] = $this->calc->productRevenueByYear($p, $y);
                 }
-                $row[] = $this->c_lblC($this->paren($p->getMonthlyPrices()));
-                $row[] = $this->c_lblC($this->paren($p->getMonthlyQty()));
-                $row[] = $this->c_lblC($this->paren($p->getGrowthRates()));
-                $row[] = $this->c_lblC($this->paren($revByYear));
-            }
-            foreach ($totalByYear as $v) {
-                $row[] = $this->c_num($v);
-            }
-            $rows[] = $row;
-        }
+                $row = [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($p->getName()),
+                    ...$this->monthCols($p->getMonthlyPrices()),
+                    ...$this->monthCols($p->getMonthlyQty()),
+                    ...$this->yearCols($p->getGrowthRates(), array_slice(self::YEARS, 1)),
+                    ...$this->yearCols($revByYear),
+                ];
+                foreach ($totalByYear as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-        $widths = [195, 240, 115, 260];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 280, 280, 240, 260);
-        }
-        for ($i = 0; $i < 5; $i++) {
-            $widths[] = 130;
-        }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        $widths = array_merge(
+            [70, 195, 240, 220],
+            array_fill(0, 12, 85), array_fill(0, 12, 85),
+            array_fill(0, 4, 105), array_fill(0, 5, 120),
+            array_fill(0, 5, 140),
+        );
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
-    // ─── Feuille 3 : Matières premières (une ligne par entreprise, groupe par matière) ─
+    // ─── Feuille 3 : Matières premières (une ligne par matière) ────────────────
 
     private function buildMatieresSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getMaterials()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb matières', 'Matières (noms)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Coût unitaire mensuel Ar (Matière $n)";
-            $headers[] = "Quantités mensuelles (Matière $n)";
-            $headers[] = "Croissance annuelle % An2-5 (Matière $n)";
-        }
-        foreach (self::YEARS as $y) {
-            $headers[] = "Coût total $y (Ar)";
-        }
+        $headers = array_merge(
+            ['id', 'Promoteur', 'Entreprise', 'Matières (noms)'],
+            $this->monthHeaders('Coût unitaire Ar'),
+            $this->monthHeaders('Qté'),
+            $this->yearHeaders('Croissance %', array_slice(self::YEARS, 1)),
+            $this->yearHeaders('Coût Ar'),
+            array_map(fn ($y) => "Coût total $y (Ar)", self::YEARS),
+        );
+        $totalColCount = 5;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $materials = $company->getMaterials()->toArray();
-
-            $totalByYear = [];
-            for ($y = 0; $y < 5; $y++) {
-                $sum = 0;
-                foreach ($materials as $m) {
-                    $sum += $this->calc->materialCostByYear($m, $y);
-                }
-                $totalByYear[] = $sum;
-            }
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($materials)),
-                $this->c_lblC($this->joinList(array_map(fn ($m) => $m->getName(), $materials))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $m = $materials[$i] ?? null;
-                if (!$m) {
-                    for ($k = 0; $k < 3; $k++) {
-                        $row[] = $this->c_lblC('-');
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getMaterials()->toArray(),
+            function ($m, $ctx) {
+                $materials = $ctx['company']->getMaterials()->toArray();
+                $totalByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $sum = 0;
+                    foreach ($materials as $mm) {
+                        $sum += $this->calc->materialCostByYear($mm, $y);
                     }
-                    continue;
+                    $totalByYear[] = $sum;
                 }
-                $row[] = $this->c_lblC($this->paren($m->getMonthlyUnitCosts()));
-                $row[] = $this->c_lblC($this->paren($m->getMonthlyQty()));
-                $row[] = $this->c_lblC($this->paren($m->getGrowthRates()));
-            }
-            foreach ($totalByYear as $v) {
-                $row[] = $this->c_num($v);
-            }
-            $rows[] = $row;
-        }
+                $costByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $costByYear[] = $this->calc->materialCostByYear($m, $y);
+                }
+                $row = [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($m->getName()),
+                    ...$this->monthCols($m->getMonthlyUnitCosts()),
+                    ...$this->monthCols($m->getMonthlyQty()),
+                    ...$this->yearCols($m->getGrowthRates(), array_slice(self::YEARS, 1)),
+                    ...$this->yearCols($costByYear),
+                ];
+                foreach ($totalByYear as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-        $widths = [195, 240, 125, 260];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 280, 280, 240);
-        }
-        for ($i = 0; $i < 5; $i++) {
-            $widths[] = 130;
-        }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        $widths = array_merge(
+            [70, 195, 240, 220],
+            array_fill(0, 12, 85), array_fill(0, 12, 85),
+            array_fill(0, 4, 105), array_fill(0, 5, 120),
+            array_fill(0, 5, 140),
+        );
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
-    // ─── Feuille 4 : Personnel (une ligne par entreprise, groupe par poste) ────
+    // ─── Feuille 4 : Personnel (une ligne par poste) ───────────────────────────
 
     private function buildPersonnelSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getStaffMembers()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb postes', 'Postes (noms)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Salaire mensuel Ar (Poste $n)";
-            $headers[] = "Effectif (Poste $n)";
-            $headers[] = "Taux de charges % (Poste $n)";
-            $headers[] = "Croissance annuelle % An2-5 (Poste $n)";
-            $headers[] = "Coût annuel An1-5 Ar (Poste $n)";
-        }
-        foreach (self::YEARS as $y) {
-            $headers[] = "Coût total $y (Ar)";
-        }
+        $headers = array_merge(
+            ['id', 'Promoteur', 'Entreprise', 'Postes (noms)', 'Salaire mensuel Ar', 'Effectif', 'Taux de charges %'],
+            $this->yearHeaders('Croissance %', array_slice(self::YEARS, 1)),
+            $this->yearHeaders('Coût Ar'),
+            array_map(fn ($y) => "Coût total $y (Ar)", self::YEARS),
+        );
+        $totalColCount = 5;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $staff = $company->getStaffMembers()->toArray();
-
-            $totalByYear = [];
-            for ($y = 0; $y < 5; $y++) {
-                $sum = 0;
-                foreach ($staff as $s) {
-                    $sum += $this->calc->staffAnnualCostByYear($s, $y);
-                }
-                $totalByYear[] = $sum;
-            }
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($staff)),
-                $this->c_lblC($this->joinList(array_map(fn ($s) => $s->getRoleName(), $staff))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $s = $staff[$i] ?? null;
-                if (!$s) {
-                    for ($k = 0; $k < 5; $k++) {
-                        $row[] = $this->c_lblC('-');
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getStaffMembers()->toArray(),
+            function ($s, $ctx) {
+                $staff = $ctx['company']->getStaffMembers()->toArray();
+                $totalByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $sum = 0;
+                    foreach ($staff as $st) {
+                        $sum += $this->calc->staffAnnualCostByYear($st, $y);
                     }
-                    continue;
+                    $totalByYear[] = $sum;
                 }
                 $costByYear = [];
                 for ($y = 0; $y < 5; $y++) {
                     $costByYear[] = $this->calc->staffAnnualCostByYear($s, $y);
                 }
-                $row[] = $this->c_numC($s->getMonthlySalary());
-                $row[] = $this->c_numC($s->getHeadcount());
-                $row[] = $this->c_numC($s->getChargesRate());
-                $row[] = $this->c_lblC($this->paren($s->getGrowthRates()));
-                $row[] = $this->c_lblC($this->paren($costByYear));
-            }
-            foreach ($totalByYear as $v) {
-                $row[] = $this->c_num($v);
-            }
-            $rows[] = $row;
-        }
+                $row = [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($s->getRoleName()),
+                    $this->c_numC($s->getMonthlySalary()),
+                    $this->c_numC($s->getHeadcount()),
+                    $this->c_numC($s->getChargesRate()),
+                    ...$this->yearCols($s->getGrowthRates(), array_slice(self::YEARS, 1)),
+                    ...$this->yearCols($costByYear),
+                ];
+                foreach ($totalByYear as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-        $widths = [195, 240, 115, 260];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 200, 120, 180, 240, 280);
-        }
-        for ($i = 0; $i < 5; $i++) {
-            $widths[] = 140;
-        }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        $widths = array_merge(
+            [70, 195, 240, 220, 200, 120, 180],
+            array_fill(0, 4, 110), array_fill(0, 5, 120),
+            array_fill(0, 5, 140),
+        );
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
-    // ─── Feuille 5 : Charges (une ligne par entreprise, groupe par charge) ─────
+    // ─── Feuille 5 : Charges (une ligne par charge) ────────────────────────────
 
     private function buildChargesSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getExpenses()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb charges', 'Charges (noms)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Montant mensuel Ar (Charge $n)";
-            $headers[] = "Présence saisonnière par mois (Charge $n)";
-            $headers[] = "Inflation annuelle % An2-5 (Charge $n)";
-            $headers[] = "Total An1-5 Ar (Charge $n)";
-        }
-        foreach (self::YEARS as $y) {
-            $headers[] = "Total $y (Ar)";
-        }
+        $headers = array_merge(
+            ['id', 'Promoteur', 'Entreprise', 'Charges (noms)'],
+            $this->monthHeaders('Montant Ar'),
+            $this->monthHeaders('Présence'),
+            $this->yearHeaders('Inflation %', array_slice(self::YEARS, 1)),
+            $this->yearHeaders('Total Ar'),
+            array_map(fn ($y) => "Total $y (Ar)", self::YEARS),
+        );
+        $totalColCount = 5;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $exp = $company->getExpenses()->toArray();
-
-            $totalByYear = [];
-            for ($y = 0; $y < 5; $y++) {
-                $sum = 0;
-                foreach ($exp as $e) {
-                    $sum += $this->calc->expenseTotalByYear($e, $y);
-                }
-                $totalByYear[] = $sum;
-            }
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($exp)),
-                $this->c_lblC($this->joinList(array_map(fn ($e) => $e->getName(), $exp))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $e = $exp[$i] ?? null;
-                if (!$e) {
-                    for ($k = 0; $k < 4; $k++) {
-                        $row[] = $this->c_lblC('-');
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getExpenses()->toArray(),
+            function ($e, $ctx) {
+                $exp = $ctx['company']->getExpenses()->toArray();
+                $totalByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $sum = 0;
+                    foreach ($exp as $ee) {
+                        $sum += $this->calc->expenseTotalByYear($ee, $y);
                     }
-                    continue;
+                    $totalByYear[] = $sum;
                 }
                 $totByYear = [];
                 for ($y = 0; $y < 5; $y++) {
                     $totByYear[] = $this->calc->expenseTotalByYear($e, $y);
                 }
-                $row[] = $this->c_lblC($this->paren($e->getMonthlyAmounts()));
-                $row[] = $this->c_lblC($this->paren($e->getSeasonality()));
-                $row[] = $this->c_lblC($this->paren($e->getInflationGrowth()));
-                $row[] = $this->c_lblC($this->paren($totByYear));
-            }
-            foreach ($totalByYear as $v) {
-                $row[] = $this->c_num($v);
-            }
-            $rows[] = $row;
-        }
+                $row = [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($e->getName()),
+                    ...$this->monthCols($e->getMonthlyAmounts()),
+                    ...$this->monthCols($e->getSeasonality()),
+                    ...$this->yearCols($e->getInflationGrowth(), array_slice(self::YEARS, 1)),
+                    ...$this->yearCols($totByYear),
+                ];
+                foreach ($totalByYear as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-        $widths = [195, 240, 115, 260];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 280, 280, 240, 260);
-        }
-        for ($i = 0; $i < 5; $i++) {
-            $widths[] = 130;
-        }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        $widths = array_merge(
+            [70, 195, 240, 220],
+            array_fill(0, 12, 85), array_fill(0, 12, 85),
+            array_fill(0, 4, 105), array_fill(0, 5, 120),
+            array_fill(0, 5, 140),
+        );
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
-    // ─── Feuille 6 : Investissements amortissables (groupe par investissement) ─
+    // ─── Feuille 6 : Investissements amortissables (une ligne par investissement) ─
 
     private function buildInvestissementsSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getInvestments()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb investissements', 'Investissements (désignations)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Montant Ar (Investissement $n)";
-            $headers[] = "Durée amort. ans (Investissement $n)";
-            $headers[] = "Type d'équipement (Investissement $n)";
-            $headers[] = "Type d'apport (Investissement $n)";
-            $headers[] = "Fonds propres Ar / % (Investissement $n)";
-            $headers[] = "Subvention Ar / % (Investissement $n)";
-            $headers[] = "Emprunt Ar / % (Investissement $n)";
-            $headers[] = "Taux et durée emprunt (Investissement $n)";
-            $headers[] = "Amortissement annuel Ar (Investissement $n)";
-            $headers[] = "VNC An1-5 Ar (Investissement $n)";
-        }
-        $headers[] = 'Total investissement (Ar)';
-        $headers[] = 'Total fonds propres (Ar)';
-        $headers[] = 'Total subvention (Ar)';
-        $headers[] = 'Total emprunt (Ar)';
+        $headers = [
+            'id', 'Promoteur', 'Entreprise', 'Investissements (désignations)',
+            'Montant Ar', 'Durée amort. ans', "Type d'équipement", "Type d'apport",
+            'Fonds propres Ar / %', 'Subvention Ar / %', 'Emprunt Ar / %', 'Taux et durée emprunt',
+            'Amortissement annuel Ar',
+        ];
+        $headers = array_merge($headers, $this->yearHeaders('VNC Ar'), [
+            'Total investissement (Ar)', 'Total fonds propres (Ar)', 'Total subvention (Ar)', 'Total emprunt (Ar)',
+        ]);
         foreach (self::YEARS as $y) {
             $headers[] = "VNC totale $y (Ar)";
         }
+        $totalColCount = 4 + 5;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $result = $ctx['result'];
-            $inv = $company->getInvestments()->toArray();
+        $pct = fn ($part, $total) => $total > 0 ? round(($part / $total) * 1000) / 10 : 0;
 
-            $depByInv = [];
-            foreach ($result['depreciationTable']['byInvestment'] as $d) {
-                $depByInv[$d['investmentId']] = $d;
-            }
-
-            $totalInvest = array_sum(array_map(fn ($i) => $i->getAmount(), $inv));
-            $totalEquity = array_sum(array_map(fn ($i) => $i->getFinancedEquity(), $inv));
-            $totalGrant  = array_sum(array_map(fn ($i) => $i->getFinancedGrant(), $inv));
-            $totalLoan   = array_sum(array_map(fn ($i) => $i->getFinancedLoan(), $inv));
-
-            $vncTotalByYear = [];
-            for ($y = 0; $y < 5; $y++) {
-                $sum = 0;
-                foreach ($inv as $i) {
-                    $sum += $depByInv[$i->getId()]['yearlyBook'][$y] ?? 0;
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getInvestments()->toArray(),
+            function ($it, $ctx) use ($pct) {
+                $inv = $ctx['company']->getInvestments()->toArray();
+                $depByInv = [];
+                foreach ($ctx['result']['depreciationTable']['byInvestment'] as $d) {
+                    $depByInv[$d['investmentId']] = $d;
                 }
-                $vncTotalByYear[] = $sum;
-            }
-
-            $pct = fn ($part, $total) => $total > 0 ? round(($part / $total) * 1000) / 10 : 0;
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($inv)),
-                $this->c_lblC($this->joinList(array_map(fn ($i) => $i->getName(), $inv))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $it = $inv[$i] ?? null;
-                if (!$it) {
-                    for ($k = 0; $k < 10; $k++) {
-                        $row[] = $this->c_lblC('-');
+                $totalInvest = array_sum(array_map(fn ($i) => $i->getAmount(), $inv));
+                $totalEquity = array_sum(array_map(fn ($i) => $i->getFinancedEquity(), $inv));
+                $totalGrant  = array_sum(array_map(fn ($i) => $i->getFinancedGrant(), $inv));
+                $totalLoan   = array_sum(array_map(fn ($i) => $i->getFinancedLoan(), $inv));
+                $vncTotalByYear = [];
+                for ($y = 0; $y < 5; $y++) {
+                    $sum = 0;
+                    foreach ($inv as $i) {
+                        $sum += $depByInv[$i->getId()]['yearlyBook'][$y] ?? 0;
                     }
-                    continue;
+                    $vncTotalByYear[] = $sum;
                 }
                 $dep = $depByInv[$it->getId()] ?? null;
-                $row[] = $this->c_numC($it->getAmount());
-                $row[] = $this->c_numC($it->getUsefulLife());
-                $row[] = $this->c_lblC($it->getEquipmentType() === 'electrique' ? 'Électrique' : 'Non électrique');
-                $row[] = $this->c_lblC($it->getContributionType() === 'nature' ? 'Apport en nature' : 'Apport financier');
-                $row[] = $this->c_lblC($this->fmtNum($it->getFinancedEquity()) . ' (' . $this->fmtNum($pct($it->getFinancedEquity(), $it->getAmount())) . '%)');
-                $row[] = $this->c_lblC($this->fmtNum($it->getFinancedGrant()) . ' (' . $this->fmtNum($pct($it->getFinancedGrant(), $it->getAmount())) . '%)');
-                $row[] = $this->c_lblC($this->fmtNum($it->getFinancedLoan()) . ' (' . $this->fmtNum($pct($it->getFinancedLoan(), $it->getAmount())) . '%)');
-                $row[] = $this->c_lblC($this->fmtNum($it->getLoanRate()) . '% / ' . $this->fmtNum($it->getLoanYears()) . ' ans');
-                $row[] = $this->c_numC($it->getUsefulLife() > 0 ? (int) round($it->getAmount() / $it->getUsefulLife()) : 0);
                 $yearlyBook = $dep['yearlyBook'] ?? [0, 0, 0, 0, 0];
-                $row[] = $this->c_lblC($this->paren($yearlyBook));
-            }
-            $row[] = $this->c_num($totalInvest);
-            $row[] = $this->c_num($totalEquity);
-            $row[] = $this->c_num($totalGrant);
-            $row[] = $this->c_num($totalLoan);
-            foreach ($vncTotalByYear as $v) {
-                $row[] = $this->c_num($v);
-            }
-            $rows[] = $row;
-        }
 
-        $widths = [195, 240, 130, 280];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 150, 160, 180, 200, 220, 220, 220, 200, 220, 280);
-        }
-        array_push($widths, 150, 150, 150, 150);
+                $row = [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($it->getName()),
+                    $this->c_numC($it->getAmount()),
+                    $this->c_numC($it->getUsefulLife()),
+                    $this->c_lblC($it->getEquipmentType() === 'electrique' ? 'Électrique' : 'Non électrique'),
+                    $this->c_lblC($it->getContributionType() === 'nature' ? 'Apport en nature' : 'Apport financier'),
+                    $this->c_lblC($this->fmtNum($it->getFinancedEquity()) . ' (' . $this->fmtNum($pct($it->getFinancedEquity(), $it->getAmount())) . '%)'),
+                    $this->c_lblC($this->fmtNum($it->getFinancedGrant()) . ' (' . $this->fmtNum($pct($it->getFinancedGrant(), $it->getAmount())) . '%)'),
+                    $this->c_lblC($this->fmtNum($it->getFinancedLoan()) . ' (' . $this->fmtNum($pct($it->getFinancedLoan(), $it->getAmount())) . '%)'),
+                    $this->c_lblC($this->fmtNum($it->getLoanRate()) . '% / ' . $this->fmtNum($it->getLoanYears()) . ' ans'),
+                    $this->c_numC($it->getUsefulLife() > 0 ? (int) round($it->getAmount() / $it->getUsefulLife()) : 0),
+                    ...$this->yearCols($yearlyBook),
+                    $this->c_numC($totalInvest),
+                    $this->c_numC($totalEquity),
+                    $this->c_numC($totalGrant),
+                    $this->c_numC($totalLoan),
+                ];
+                foreach ($vncTotalByYear as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
+
+        $widths = array_merge(
+            [70, 195, 240, 240, 150, 160, 180, 200, 220, 220, 220, 200, 220],
+            array_fill(0, 5, 120),
+            [150, 150, 150, 150],
+        );
         for ($i = 0; $i < 5; $i++) {
             $widths[] = 130;
         }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
-    // ─── Feuille 7 : Investissements non amortissables (groupe par élément) ───
+    // ─── Feuille 7 : Investissements non amortissables (une ligne par élément) ─
 
     private function buildInvestTerrainSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['company']->getInvestmentTerrains()->toArray());
-        $headers = ['Promoteur', 'Entreprise', 'Nb éléments', 'Investissements non amortis (désignations)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $headers[] = 'Montant Ar (Élément ' . ($i + 1) . ')';
-        }
-        $headers[] = 'Total (Ar)';
+        $headers = ['id', 'Promoteur', 'Entreprise', 'Investissements non amortis (désignations)', 'Nature', 'Montant Ar', 'Total (Ar)'];
+        $totalColCount = 1;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $it = $company->getInvestmentTerrains()->toArray();
-            $total = array_sum(array_map(fn ($x) => $x->getAmount(), $it));
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['company']->getInvestmentTerrains()->toArray(),
+            function ($x, $ctx) {
+                $it = $ctx['company']->getInvestmentTerrains()->toArray();
+                $total = array_sum(array_map(fn ($xx) => $xx->getAmount(), $it));
+                return [
+                    $this->c_numC($ctx['company']->getId()),
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($x->getName()),
+                    $this->c_lblC($x->getNatureType() === 'immateriel' ? 'Immatériel' : 'Physique'),
+                    $this->c_numC($x->getAmount()),
+                    $this->c_numC($total),
+                ];
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($it)),
-                $this->c_lblC($this->joinList(array_map(fn ($x) => $x->getName(), $it))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $x = $it[$i] ?? null;
-                $row[] = $x ? $this->c_numC($x->getAmount()) : $this->c_lblC('-');
-            }
-            $row[] = $this->c_num($total);
-            $rows[] = $row;
-        }
-
-        $widths = [195, 240, 120, 280];
-        for ($i = 0; $i < $maxN; $i++) {
-            $widths[] = 170;
-        }
-        $widths[] = 150;
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        $widths = [70, 195, 240, 280, 120, 170, 150];
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 
     // ─── Feuille 8 : Financements additionnels (une ligne par entreprise, séries An1-5) ─
 
     private function buildFinancementsSheet(array $contexts): array
     {
-        $headers = [
-            'Promoteur', 'Entreprise',
-            'Fonds propres An1-5 (Ar)', 'Emprunt An1-5 (Ar)',
-            'Taux emprunt An1-5 (%)', 'Durée emprunt An1-5 (ans)', 'Subvention An1-5 (Ar)',
-        ];
+        $headers = array_merge(
+            ['Promoteur', 'Entreprise'],
+            $this->yearHeaders('Fonds propres Ar'),
+            $this->yearHeaders('Emprunt Ar'),
+            $this->yearHeaders('Taux emprunt %'),
+            $this->yearHeaders('Durée emprunt ans'),
+            $this->yearHeaders('Subvention Ar'),
+        );
 
         $rows = [];
         foreach ($contexts as $ctx) {
@@ -792,21 +797,21 @@ class DashboardXlsxBuilder
                     }
                     $out[] = $item ? $getV($item) : 0;
                 }
-                return $this->paren($out);
+                return $out;
             };
 
             $rows[] = [
                 $this->c_lbl($this->normalize($company->getPromoteur()), true),
                 $this->c_lbl($company->getName()),
-                $this->c_lblC($seriesFor(fn ($x) => $x->getEquity())),
-                $this->c_lblC($seriesFor(fn ($x) => $x->getLoan())),
-                $this->c_lblC($seriesFor(fn ($x) => $x->getLoanRate())),
-                $this->c_lblC($seriesFor(fn ($x) => $x->getLoanYears())),
-                $this->c_lblC($seriesFor(fn ($x) => $x->getGrant())),
+                ...$this->yearCols($seriesFor(fn ($x) => $x->getEquity())),
+                ...$this->yearCols($seriesFor(fn ($x) => $x->getLoan())),
+                ...$this->yearCols($seriesFor(fn ($x) => $x->getLoanRate())),
+                ...$this->yearCols($seriesFor(fn ($x) => $x->getLoanYears())),
+                ...$this->yearCols($seriesFor(fn ($x) => $x->getGrant())),
             ];
         }
 
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => [195, 240, 280, 280, 240, 240, 280]];
+        return ['headers' => $headers, 'rows' => $rows, 'widths' => array_merge([195, 240], array_fill(0, 25, 110))];
     }
 
     // ─── Feuilles pivot génériques (Compte de résultat, Trésorerie, Bilan, Plan de financement) ─
@@ -818,7 +823,7 @@ class DashboardXlsxBuilder
     {
         $headers = ['Promoteur', 'Entreprise'];
         foreach ($indicators as $ind) {
-            $headers[] = "{$ind['label']} An1→An5 (Ar)";
+            $headers = array_merge($headers, $this->yearHeaders($ind['label']));
         }
 
         $rows = [];
@@ -830,14 +835,14 @@ class DashboardXlsxBuilder
                 $this->c_lbl($company->getName()),
             ];
             foreach ($indicators as $ind) {
-                $row[] = $this->c_lblC($this->paren(($ind['get'])($result)));
+                $row = array_merge($row, $this->yearCols(($ind['get'])($result)));
             }
             $rows[] = $row;
         }
 
         $widths = [195, 240];
         foreach ($indicators as $ind) {
-            $widths[] = 260;
+            $widths = array_merge($widths, array_fill(0, 5, 120));
         }
         return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
     }
@@ -947,55 +952,61 @@ class DashboardXlsxBuilder
         return ['headers' => $headers, 'rows' => $rows, 'widths' => [195, 240, 160, 140, 160, 130, 160, 140, 160, 130]];
     }
 
-    // ─── Feuille : Emprunts (une ligne par entreprise, groupe par emprunt) ─────
+    // ─── Feuille : Emprunts (une ligne par emprunt) ────────────────────────────
 
     private function buildEmpruntsSheet(array $contexts): array
     {
-        $maxN = $this->maxCount($contexts, fn ($ctx) => $ctx['result']['loanRepaymentTable']['byLoan']);
-        $headers = ['Promoteur', 'Entreprise', 'Nb emprunts', 'Emprunts (libellés)'];
-        for ($i = 0; $i < $maxN; $i++) {
-            $n = $i + 1;
-            $headers[] = "Principal Ar (Emprunt $n)";
-            $headers[] = "Taux % (Emprunt $n)";
-            $headers[] = "Durée ans (Emprunt $n)";
-            $headers[] = "Capital remboursé par an Ar (Emprunt $n)";
-            $headers[] = "Intérêts par an Ar (Emprunt $n)";
-            $headers[] = "Solde restant par an Ar (Emprunt $n)";
+        $headers = array_merge(
+            ['Promoteur', 'Entreprise', 'Emprunts (libellés)', 'Principal Ar', 'Taux %', 'Durée ans'],
+            $this->yearHeaders('Capital remboursé Ar'),
+            $this->yearHeaders('Intérêts Ar'),
+            $this->yearHeaders('Solde restant Ar'),
+        );
+        foreach (self::YEARS as $y) {
+            $headers[] = "Capital total remboursé $y (Ar)";
         }
+        foreach (self::YEARS as $y) {
+            $headers[] = "Intérêts totaux $y (Ar)";
+        }
+        $totalColCount = 10;
+        $totalStartCol = count($headers) - $totalColCount;
 
-        $rows = [];
-        foreach ($contexts as $ctx) {
-            $company = $ctx['company'];
-            $loans = $ctx['result']['loanRepaymentTable']['byLoan'];
-
-            $row = [
-                $this->c_lbl($this->normalize($company->getPromoteur()), true),
-                $this->c_lbl($company->getName()),
-                $this->c_numC(count($loans)),
-                $this->c_lblC($this->joinList(array_map(fn ($l) => $l['label'], $loans))),
-            ];
-            for ($i = 0; $i < $maxN; $i++) {
-                $l = $loans[$i] ?? null;
-                if (!$l) {
-                    for ($k = 0; $k < 6; $k++) {
-                        $row[] = $this->c_lblC('-');
-                    }
-                    continue;
+        $built = $this->buildLongFormatRows(
+            $contexts,
+            fn ($ctx) => $ctx['result']['loanRepaymentTable']['byLoan'],
+            function ($l, $ctx) {
+                $totalCapital = $ctx['result']['loanRepaymentTable']['totalCapitalByYear'];
+                $totalInterest = $ctx['result']['loanRepaymentTable']['totalInterestByYear'];
+                $row = [
+                    $this->c_lbl($this->normalize($ctx['company']->getPromoteur()), true),
+                    $this->c_lbl($ctx['company']->getName()),
+                    $this->c_lblC($l['label']),
+                    $this->c_numC($l['principal']),
+                    $this->c_numC($l['rate']),
+                    $this->c_numC($l['years']),
+                    ...$this->yearCols(array_map(fn ($p) => $p['capital'], $l['annualPayments'])),
+                    ...$this->yearCols(array_map(fn ($p) => $p['interest'], $l['annualPayments'])),
+                    ...$this->yearCols(array_map(fn ($p) => $p['balance'], $l['annualPayments'])),
+                ];
+                foreach ($totalCapital as $v) {
+                    $row[] = $this->c_numC($v);
                 }
-                $row[] = $this->c_numC($l['principal']);
-                $row[] = $this->c_numC($l['rate']);
-                $row[] = $this->c_numC($l['years']);
-                $row[] = $this->c_lblC($this->paren(array_map(fn ($p) => $p['capital'], $l['annualPayments'])));
-                $row[] = $this->c_lblC($this->paren(array_map(fn ($p) => $p['interest'], $l['annualPayments'])));
-                $row[] = $this->c_lblC($this->paren(array_map(fn ($p) => $p['balance'], $l['annualPayments'])));
-            }
-            $rows[] = $row;
-        }
+                foreach ($totalInterest as $v) {
+                    $row[] = $this->c_numC($v);
+                }
+                return $row;
+            },
+            $totalStartCol,
+            $totalColCount,
+        );
 
-        $widths = [195, 240, 130, 280];
-        for ($i = 0; $i < $maxN; $i++) {
-            array_push($widths, 160, 140, 140, 300, 300, 300);
+        $widths = array_merge(
+            [195, 240, 240, 160, 140, 140],
+            array_fill(0, 5, 130), array_fill(0, 5, 130), array_fill(0, 5, 130),
+        );
+        for ($i = 0; $i < 10; $i++) {
+            $widths[] = 150;
         }
-        return ['headers' => $headers, 'rows' => $rows, 'widths' => $widths];
+        return ['headers' => $headers, 'rows' => $built['rows'], 'widths' => $widths, 'merges' => $built['merges']];
     }
 }

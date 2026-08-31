@@ -1,20 +1,4 @@
-/**
- * Couche API offline-aware.
- *
- * Pour chaque opération :
- *  - En ligne  → appel serveur + mise à jour du cache IndexedDB
- *  - Hors ligne → mise à jour du cache IndexedDB + ajout à la queue de sync
- *
- * Filet de sécurité important : `isOnline()` (basé sur navigator.onLine / events
- * navigateur) peut se tromper — le Wi-Fi reste "connecté" mais le serveur est
- * injoignable (coupure en amont, serveur down, portail captif...). Dans ce cas,
- * la tentative "en ligne" échoue réellement (fetch qui rejette), et on doit
- * impérativement basculer sur l'écriture locale + la queue au lieu de laisser
- * l'erreur remonter et perdre la saisie de l'utilisateur. C'est le rôle de
- * `withOfflineFallback` ci-dessous, utilisé par toutes les opérations.
- *
- * Les composants utilisent ces fonctions au lieu des fonctions `api.ts` directement.
- */
+
 import {
   productApi,
   materialApi,
@@ -40,7 +24,7 @@ import type {
   CompanySettings,
 } from '@/types'
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+//  Helper 
 
 function isOnline(): boolean {
   return useNetworkStore.getState().isOnline
@@ -117,6 +101,7 @@ const DEFAULTS = {
 
   investmentTerrain: {
     amount: 0,
+    natureType: 'physique',
     sortOrder: 0,
   } satisfies Omit<InvestmentTerrain, 'id' | 'name'>,
 }
@@ -419,7 +404,7 @@ export const offlineExpenseApi = {
 export const offlineInvestmentApi = {
   async create(
     companyId: number,
-    data: { name: string; amount?: number; usefulLife?: number; equipmentType?: 'electrique' | 'non_electrique' | null; financedEquity?: number; contributionType?: 'nature' | 'financier'; financedLoan?: number; financedGrant?: number; loanRate?: number; loanYears?: number },
+    data: { name: string; amount?: number; usefulLife?: number; financedEquity?: number; financedLoan?: number; financedGrant?: number; loanRate?: number; loanYears?: number },
   ): Promise<Investment> {
     const id = generateTempId()
     return withOfflineFallback(

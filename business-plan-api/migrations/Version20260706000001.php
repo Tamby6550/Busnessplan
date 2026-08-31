@@ -31,7 +31,7 @@ final class Version20260706000001 extends AbstractMigration
         $this->addSql('ALTER TABLE investment_terrains ADD COLUMN loan_years SMALLINT NOT NULL DEFAULT 5 AFTER loan_rate');
     }
 
-    // ── Helper : supprime une colonne seulement si elle existe ───────────────
+    //  Helper : supprime une colonne seulement si elle existe 
     private function dropColIfExists(string $table, string $col): void
     {
         $exists = (int) $this->connection->fetchOne(

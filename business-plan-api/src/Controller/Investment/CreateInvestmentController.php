@@ -17,7 +17,8 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
 /**
  * Ajoute un investissement (immobilisation) à une entreprise.
  * Body attendu : { "name": "Machine", "amount": 5000000, "usefulLife": 5,
- *                  "financedEquity": 2000000, "financedLoan": 3000000,
+ *                  "equipmentType": "electrique", "financedEquity": 2000000,
+ *                  "contributionType": "financier", "financedLoan": 3000000,
  *                  "financedGrant": 0, "loanRate": 12, "loanYears": 5 }
  */
 #[Route('/api/companies/{companyId}/investments', name: 'api_create_investment', methods: ['POST'])]
@@ -47,13 +48,13 @@ class CreateInvestmentController extends AbstractController
             'name'             => $name,
             'amount'           => $body['amount'] ?? 0,
             'usefulLife'       => $body['usefulLife'] ?? 5,
+            'equipmentType'    => $body['equipmentType'] ?? null,
             'financedEquity'   => $body['financedEquity'] ?? 0,
+            'contributionType' => $body['contributionType'] ?? 'financier',
             'financedLoan'     => $body['financedLoan'] ?? 0,
             'financedGrant'    => $body['financedGrant'] ?? 0,
             'loanRate'         => $body['loanRate'] ?? 0.0,
             'loanYears'        => $body['loanYears'] ?? 0,
-            'equipmentType'    => $body['equipmentType'] ?? null,
-            'contributionType' => $body['contributionType'] ?? 'financier',
         ]);
 
         return $this->json([
@@ -61,13 +62,13 @@ class CreateInvestmentController extends AbstractController
             'name'             => $investment->getName(),
             'amount'           => $investment->getAmount(),
             'usefulLife'       => $investment->getUsefulLife(),
+            'equipmentType'    => $investment->getEquipmentType(),
             'financedEquity'   => $investment->getFinancedEquity(),
+            'contributionType' => $investment->getContributionType(),
             'financedLoan'     => $investment->getFinancedLoan(),
             'financedGrant'    => $investment->getFinancedGrant(),
             'loanRate'         => $investment->getLoanRate(),
             'loanYears'        => $investment->getLoanYears(),
-            'equipmentType'    => $investment->getEquipmentType(),
-            'contributionType' => $investment->getContributionType(),
             'sortOrder'        => $investment->getSortOrder(),
         ], Response::HTTP_CREATED);
     }

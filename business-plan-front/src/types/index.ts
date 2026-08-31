@@ -142,10 +142,9 @@ export interface Investment {
   name: string
   amount: number         // BIGINT
   usefulLife: number     // years
-  equipmentType: 'electrique' | 'non_electrique' | null  // informatif
+  equipmentType: 'electrique' | 'non_electrique' | null
   financedEquity: number
-  // Nature de l'apport en fonds propres :
-  // 'nature'    = apport en nature (bien déjà possédé) → financedEquity = 100% de amount, pas de subvention/emprunt
+  // 'nature'    = apport en nature (bien déjà possédé) → toujours 100% de financedEquity, pas de subvention/emprunt
   // 'financier' = apport en espèces → pourcentage libre de 0 à 99%, le reste financé par subvention/emprunt
   contributionType: 'nature' | 'financier'
   financedLoan: number
@@ -162,6 +161,7 @@ export interface InvestmentTerrain {
   id: number
   name: string
   amount: number         // BIGINT
+  natureType: 'immateriel' | 'physique'
   sortOrder: number
 }
 

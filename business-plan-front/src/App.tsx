@@ -28,13 +28,12 @@ export default function App() {
   const logout = useAuthStore((s) => s.logout)
   const [ready, setReady] = useState(false)
 
-  // Initialise le service de synchronisation offline (listeners online/offline)
+
   useEffect(() => {
     const cleanup = syncService.init()
     return cleanup
   }, [])
 
-  // Restaure le profil utilisateur au démarrage si token présent mais user absent
   useEffect(() => {
     if (token && !user) {
       authApi.me()

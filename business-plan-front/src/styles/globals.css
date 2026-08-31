@@ -1,7 +1,6 @@
 @import './variables.css';
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* ─── Topbar vert AIDES — barre fine en haut de l'écran ─────────────────────── */
 html::before {
   content: '';
   display: block;
@@ -14,7 +13,6 @@ html::before {
   z-index: 9999;
 }
 
-/* ─── Reset ──────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; }
 body {
@@ -29,7 +27,6 @@ a { color: inherit; text-decoration: none; }
 button { cursor: pointer; border: none; background: none; font: inherit; }
 input, select, textarea { font: inherit; }
 
-/* ─── Layout ─────────────────────────────────────────────────────────────────── */
 .app-layout {
   display: flex;
   height: 100vh;
@@ -44,7 +41,6 @@ input, select, textarea { font: inherit; }
   min-width: 0; /* prevent flex overflow */
 }
 
-/* ─── Sidebar ────────────────────────────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);
   background: var(--sidebar-bg);
@@ -105,7 +101,6 @@ input, select, textarea { font: inherit; }
   border-top: 1px solid rgba(255,255,255,0.08);
 }
 
-/* ─── Mobile hamburger button ─────────────────────────────────────────────────── */
 .mobile-topbar {
   display: none;
   align-items: center;
@@ -135,7 +130,6 @@ input, select, textarea { font: inherit; }
 
 .mobile-topbar-logo { height: 32px; }
 
-/* ─── Sidebar overlay (mobile) ────────────────────────────────────────────────── */
 .sidebar-overlay {
   display: none;
   position: fixed;
@@ -145,7 +139,6 @@ input, select, textarea { font: inherit; }
   backdrop-filter: blur(2px);
 }
 
-/* ─── Cards ──────────────────────────────────────────────────────────────────── */
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -171,7 +164,7 @@ input, select, textarea { font: inherit; }
 
 .card-body { padding: var(--space-5); }
 
-/* ─── Buttons ────────────────────────────────────────────────────────────────── */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -195,7 +188,7 @@ input, select, textarea { font: inherit; }
 .btn-sm { padding: 5px var(--space-3); font-size: var(--text-xs); }
 .btn-lg { padding: 10px var(--space-6); font-size: var(--text-md); }
 
-/* ─── Form controls ──────────────────────────────────────────────────────────── */
+
 .form-group { display: flex; flex-direction: column; gap: var(--space-1); }
 .form-label { font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--color-text-muted); }
 
@@ -218,8 +211,7 @@ input, select, textarea { font: inherit; }
 
 .form-input:disabled { background: var(--color-surface-2); cursor: not-allowed; }
 
-/* Supprime les flèches stepper natives des champs numériques (Chrome/Edge/Safari + Firefox) —
-   pour n'afficher qu'un champ de saisie normal, sans les deux boutons +/- superposés. */
+
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -246,7 +238,6 @@ input[type="number"] {
   box-shadow: 0 0 0 3px rgba(58,125,46,0.15);
 }
 
-/* ─── Tables ─────────────────────────────────────────────────────────────────── */
 .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
@@ -280,7 +271,6 @@ tfoot td {
   background: var(--color-surface-2);
 }
 
-/* ─── Inline editable cell ───────────────────────────────────────────────────── */
 .editable-cell {
   padding: 3px 6px;
   border: 1px solid transparent;
@@ -295,7 +285,7 @@ tfoot td {
   background: var(--color-primary-light);
 }
 
-/* ─── Badges ─────────────────────────────────────────────────────────────────── */
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -310,7 +300,7 @@ tfoot td {
 .badge-danger  { background: var(--color-danger-bg);  color: var(--color-danger); }
 .badge-info    { background: var(--color-info-bg);    color: var(--color-info); }
 
-/* ─── Alerts ─────────────────────────────────────────────────────────────────── */
+
 .alert {
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius);
@@ -323,7 +313,6 @@ tfoot td {
 .alert-error   { background: var(--color-danger-bg);  color: var(--color-danger);  border: 1px solid #fca5a5; }
 .alert-success { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #6ee7b7; }
 
-/* ─── Spinner ────────────────────────────────────────────────────────────────── */
 .spinner {
   width: 20px; height: 20px;
   border: 2px solid var(--color-border);
@@ -344,7 +333,7 @@ tfoot td {
   font-size: var(--text-sm);
 }
 
-/* ─── KPI cards ──────────────────────────────────────────────────────────────── */
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -376,7 +365,7 @@ tfoot td {
 
 .kpi-sub { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: 2px; }
 
-/* ─── Section title ──────────────────────────────────────────────────────────── */
+
 .section-title {
   font-size: var(--text-xl);
   font-weight: var(--font-bold);
@@ -384,24 +373,23 @@ tfoot td {
   margin-bottom: var(--space-4);
 }
 
-/* Les titres des cartes/tableaux (ex: "Compte de résultats", "Bilans"…) */
 
 .section-subtitle { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-1); }
 
-/* ─── Empty state ────────────────────────────────────────────────────────────── */
+
 .empty-state { text-align: center; padding: var(--space-12) var(--space-6); color: var(--color-text-muted); }
 .empty-state-icon { font-size: 48px; margin-bottom: var(--space-4); opacity: 0.4; }
 .empty-state-title { font-size: var(--text-lg); font-weight: var(--font-semibold); color: var(--color-text); }
 .empty-state-desc { font-size: var(--text-sm); margin-top: var(--space-2); }
 
-/* ─── Divider ────────────────────────────────────────────────────────────────── */
+
 .divider { height: 1px; background: var(--color-border); margin: var(--space-6) 0; }
 
-/* ─── Progress bar ───────────────────────────────────────────────────────────── */
+
 .progress-bar-wrapper { background: var(--color-surface-2); border-radius: 20px; height: 6px; overflow: hidden; }
 .progress-bar-fill { height: 100%; background: var(--color-primary); border-radius: 20px; transition: width var(--transition-slow); }
 
-/* ─── Grid utilities ─────────────────────────────────────────────────────────── */
+
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
 .items-center { align-items: center; }
@@ -424,11 +412,7 @@ tfoot td {
 .p-4 { padding: var(--space-4); }
 .p-6 { padding: var(--space-6); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════
-   RESPONSIVE
-═══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── Tablette (≤ 1024px) ─────────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   :root { --sidebar-width: 210px; }
 
@@ -439,13 +423,13 @@ tfoot td {
   .card-body { padding: var(--space-4); }
 }
 
-/* ── Mobile (≤ 767px) ────────────────────────────────────────────────────────── */
+
 @media (max-width: 767px) {
 
-  /* Layout : sidebar en overlay */
+  
   .app-layout { flex-direction: column; height: 100dvh; }
 
-  /* La sidebar devient un panneau glissant fixe */
+  
   .sidebar {
     position: fixed;
     top: 0; left: 0; bottom: 0;
@@ -459,13 +443,13 @@ tfoot td {
     transform: translateX(0);
   }
 
-  /* Overlay sombre quand sidebar ouverte */
+  
   .sidebar-overlay { display: block; }
 
-  /* Topbar mobile visible */
+  
   .mobile-topbar { display: flex; }
 
-  /* Contenu plein écran */
+  
   .main-content {
     padding: var(--space-4);
     padding-top: var(--space-3);
@@ -473,7 +457,7 @@ tfoot td {
     overflow-y: auto;
   }
 
-  /* KPI grid : 2 colonnes max sur mobile */
+  
   .kpi-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: var(--space-3);

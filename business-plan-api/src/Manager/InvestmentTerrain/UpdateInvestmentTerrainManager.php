@@ -14,8 +14,9 @@ class UpdateInvestmentTerrainManager
 
     public function update(InvestmentTerrain $investment, User $modifiedBy, array $data): InvestmentTerrain
     {
-        if (isset($data['name']))   $investment->setName((string) $data['name']);
-        if (isset($data['amount'])) $investment->setAmount((int) $data['amount']);
+        if (isset($data['name']))       $investment->setName((string) $data['name']);
+        if (isset($data['amount']))     $investment->setAmount((int) $data['amount']);
+        if (isset($data['natureType'])) $investment->setNatureType((string) $data['natureType']);
 
         $investment->getCompany()->setLastModifiedBy($modifiedBy);
         $this->em->flush();

@@ -4,8 +4,8 @@ import CompanyCard from '@/components/dashboard/CompanyCard'
 import ColumnFilterDropdown from '@/components/ui/ColumnFilterDropdown'
 import RangeFilterDropdown, { type NumRange } from '@/components/ui/RangeFilterDropdown'
 import { useAuthStore } from '@/stores/authStore'
-import { canSeeAll, canValidate, safeRole } from '@/utils/permissions'
-import { exportDashboardToExcel } from '@/utils/dashboardExport'
+import { canExport, canSeeAll, canValidate, safeRole } from '@/utils/permissions'
+import ExportLinkModal from '@/components/dashboard/ExportLinkModal'
 
 type FilterKey = 'entreprise' | 'secteur' | 'promoteur' | 'creePar' | 'statut'
 type Filters = Record<FilterKey, Set<string> | null>
@@ -67,34 +67,18 @@ export default function ProjectCard({
   const isAdmin = role === 'admin'
   const userCanSeeAll = canSeeAll(role)
   const userCanValidate = canValidate(role)
+  const userCanExport = canExport(role)
 
   const [isOpen, setIsOpen] = useState(true)
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [completionFilter, setCompletionFilter] = useState<NumRange | null>(null)
-  const [isExporting, setIsExporting] = useState(false)
+  const [showExportLink, setShowExportLink] = useState(false)
 
   const visibleCompanies = project.companies.filter((c: CompanySummary) => {
     if (userCanSeeAll) return true
     // Standard : voit seulement ses propres entreprises non validées
     return c.createdBy?.id === user?.id && !c.isValidated
   })
-
-  async function handleExportProject() {
-    setIsExporting(true)
-    try {
-      const { skipped } = await exportDashboardToExcel([project], user?.id, role, undefined, project.name)
-      if (skipped.length > 0) {
-        alert(
-          `Export terminé, mais ${skipped.length} entreprise(s) n'ont pas pu être incluses :\n` +
-          skipped.map((s) => `- ${s.name} (${s.reason})`).join('\n'),
-        )
-      }
-    } catch {
-      alert("Une erreur est survenue pendant l'export Excel de ce projet.")
-    } finally {
-      setIsExporting(false)
-    }
-  }
 
   const noPermission = !userCanSeeAll
 
@@ -152,7 +136,10 @@ export default function ProjectCard({
               </p>
             )}
             <div style={styles.meta}>
-              <span>{project.companyCount} entreprise{project.companyCount !== 1 ? 's' : ''}</span>
+              <span title="Identifiant du projet — à utiliser dans le lien d'export Power Query (?project=...)">
+                ID : {project.id}
+              </span>
+              <span>· {project.companyCount} entreprise{project.companyCount !== 1 ? 's' : ''}</span>
               {project.createdBy && <span>· Créé par {project.createdBy.fullName}</span>}
               {!isOpen && visibleCompanies.length > 0 && (
                 <span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
@@ -165,24 +152,17 @@ export default function ProjectCard({
 
         {/* Boutons — stopPropagation pour ne pas toggler l'accordéon */}
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportProject}
-            disabled={isExporting || visibleCompanies.length === 0}
-            title="Exporter en Excel les entreprises de ce projet"
-          >
-            {isExporting ? (
-              <>
-                <i className="fas fa-spinner fa-spin" style={{ marginRight: 6 }} />
-                Export…
-              </>
-            ) : (
-              <>
-                <i className="fas fa-file-excel" style={{ marginRight: 6 }} />
-                Export Excel
-              </>
-            )}
-          </button>
+          {userCanExport && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowExportLink(true)}
+              disabled={visibleCompanies.length === 0}
+              title="Voir le lien d'export Excel / Power Query de ce projet"
+            >
+              <i className="fas fa-link" style={{ marginRight: 6 }} />
+              Visualiser le lien
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={onAddCompany}>
             + Nouveau entreprise
           </button>
@@ -469,6 +449,15 @@ export default function ProjectCard({
             </>
           )}
         </div>
+      )}
+
+      {showExportLink && (
+        <ExportLinkModal
+          project={project}
+          projectId={project.id}
+          projectName={project.name}
+          onClose={() => setShowExportLink(false)}
+        />
       )}
     </div>
   )

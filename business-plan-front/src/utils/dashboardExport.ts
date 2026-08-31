@@ -28,8 +28,6 @@ const C = {
   lightGray: 'F8FAFC',
 }
 
-// ─── Helpers cellules (mêmes conventions que le modèle fourni / ExportSection.tsx) ─
-
 function allBorder() {
   const side = { style: 'thin', color: { rgb: C.border } }
   return { top: side, bottom: side, left: side, right: side }
@@ -72,7 +70,6 @@ function num(value: number, colored = false, fmt = '#,##0'): object {
   }}
 }
 
-/** Cellule numérique centrée (ex : "Nb produits" dans le modèle). */
 function numC(value: number, fmt = '#,##0'): object {
   return { v: value, t: 'n', z: fmt, s: {
     font: { sz: 10, color: { rgb: C.textDark } },
@@ -101,14 +98,17 @@ function normalize(v: string | null | undefined): string {
   return v && v.trim() !== '' ? v.trim() : '(Non renseigné)'
 }
 
-/** Construit une feuille à partir d'une liste d'en-têtes + de lignes de cellules déjà stylées. */
-function buildSheet(headers: string[], rows: object[][], colWidths?: number[]): Record<string, unknown> {
+type Merge = { s: { r: number; c: number }; e: { r: number; c: number } }
+
+
+function buildSheet(headers: string[], rows: object[][], colWidths?: number[], merges?: Merge[]): Record<string, unknown> {
   const ws: Record<string, unknown> = {}
   let r = 0
   setRow(ws, headers.map((h) => hdr(h)), r++)
   rows.forEach((row) => setRow(ws, row, r++))
   ws['!ref'] = XLSXStyle.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(r - 1, 0), c: headers.length - 1 } })
   if (colWidths) ws['!cols'] = colWidths.map((w) => ({ wpx: w }))
+  if (merges && merges.length) ws['!merges'] = merges
   return ws
 }
 
@@ -117,19 +117,20 @@ const DEFAULT_SETTINGS: CompanySettings = {
   discountRate: 0, taxRegime: 'IR', taxRate: 0, taxRateIs: 0, fondsRoulement: 0,
 }
 
-function fmtNum(v: number): string {
-  if (v === null || v === undefined || !isFinite(v)) return '0'
-  const r = Math.round(v * 100) / 100
-  return String(r)
+function monthHeaders(prefix: string): string[] {
+  return MONTHS.map((m) => `${prefix} ${m}`)
 }
 
-
-function paren(values: number[]): string {
-  return values.length ? `(${values.map(fmtNum).join(', ')})` : '-'
+function yearHeaders(prefix: string, labels: string[] = YEARS): string[] {
+  return labels.map((y) => `${prefix} ${y}`)
 }
 
-function joinList(values: string[]): string {
-  return values.length ? values.join(', ') : '-'
+function monthCols(values: number[]): object[] {
+  return MONTHS.map((_, i) => numC(values[i] ?? 0))
+}
+
+function yearCols(values: number[], labels: string[] = YEARS): object[] {
+  return labels.map((_, i) => numC(values[i] ?? 0))
 }
 
 function sanitizeFilename(s: string): string {
@@ -137,12 +138,33 @@ function sanitizeFilename(s: string): string {
   return cleaned.slice(0, 60) || 'Export'
 }
 
-/** Nombre maximum d'éléments d'une catégorie (produits, matières…) parmi toutes les entreprises. */
-function maxCount<T>(contexts: CompanyContext[], getItems: (ctx: CompanyContext) => T[]): number {
-  return contexts.reduce((m, ctx) => Math.max(m, getItems(ctx).length), 0)
+function buildLongFormatRows<T>(
+  contexts: CompanyContext[],
+  getItems: (ctx: CompanyContext) => T[],
+  buildRow: (item: T, ctx: CompanyContext) => object[],
+  totalStartCol: number,
+  totalColCount: number,
+): { rows: object[][]; merges: Merge[] } {
+  const rows: object[][] = []
+  const merges: Merge[] = []
+  let r = 1 // la ligne 0 est l'en-tête
+  for (const ctx of contexts) {
+    const items = getItems(ctx)
+    if (items.length === 0) continue
+    const startRow = r
+    items.forEach((item) => {
+      rows.push(buildRow(item, ctx))
+      r++
+    })
+    const endRow = r - 1
+    if (endRow > startRow && totalColCount > 0) {
+      for (let c = 0; c < totalColCount; c++) {
+        merges.push({ s: { r: startRow, c: totalStartCol + c }, e: { r: endRow, c: totalStartCol + c } })
+      }
+    }
+  }
+  return { rows, merges }
 }
-
-// ─── Contexte complet par entreprise (données brutes + calculs) ──────────────
 
 interface CompanyContext {
   projectName: string
@@ -156,11 +178,7 @@ interface BuildResult {
   skipped: { name: string; reason: string }[]
 }
 
-/**
- * Récupère le détail complet (comme à l'ouverture de l'éditeur) de chaque
- * entreprise visible par l'utilisateur, puis relance les calculs financiers.
- * En cas d'échec réseau, retombe sur le cache local hors-ligne si disponible.
- */
+
 async function loadAllContexts(
   projects: ProjectSummary[],
   currentUserId: number | undefined,
@@ -271,322 +289,306 @@ function buildRecapSheet(contexts: CompanyContext[]): Record<string, unknown> {
   ])
 }
 
-// ─── Feuille 2 : Produits (une ligne par entreprise, un groupe de colonnes par produit) ─
-
 function buildProduitsSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.products)
-  const headers = ['Promoteur', 'Entreprise', 'Nb produits', 'Produits (noms)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Prix mensuels Ar (Produit ${n})`,
-      `Quantités mensuelles (Produit ${n})`,
-      `Croissance annuelle % An2-5 (Produit ${n})`,
-      `Chiffre d'affaires An1-5 Ar (Produit ${n})`,
-    )
-  }
-  headers.push(...YEARS.map((y) => `CA total ${y} (Ar)`))
+  const headers = [
+    'id', 'Promoteur', 'Entreprise', 'Produits (noms)',
+    ...monthHeaders('Prix Ar'),
+    ...monthHeaders('Qté'),
+    ...yearHeaders('Croissance %', YEARS.slice(1)),
+    ...yearHeaders("CA Ar"),
+    ...YEARS.map((y) => `CA total ${y} (Ar)`),
+  ]
+  const totalColCount = 5
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full }) => {
-    const products = full.products
-    const totalByYear = Array.from({ length: 5 }, (_, y) => products.reduce((s, p) => s + productRevenueByYear(p, y), 0))
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(products.length),
-      lblC(joinList(products.map((p) => p.name))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const p = products[i]
-      if (!p) {
-        for (let k = 0; k < 4; k++) row.push(lblC('-'))
-      } else {
-        row.push(
-          lblC(paren(p.monthlyPrice)),
-          lblC(paren(p.monthlyQty)),
-          lblC(paren(p.growthRates)),
-          lblC(paren(Array.from({ length: 5 }, (_, y) => productRevenueByYear(p, y)))),
-        )
-      }
-    }
-    row.push(...totalByYear.map((v) => num(v)))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.products,
+    (p, ctx) => {
+      const totalByYear = Array.from({ length: 5 }, (_, y) =>
+        ctx.full.products.reduce((s, pp) => s + productRevenueByYear(pp, y), 0),
+      )
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(p.name),
+        ...monthCols(p.monthlyPrice),
+        ...monthCols(p.monthlyQty),
+        ...yearCols(p.growthRates, YEARS.slice(1)),
+        ...yearCols(Array.from({ length: 5 }, (_, y) => productRevenueByYear(p, y))),
+        ...totalByYear.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 115, 260]
-  for (let i = 0; i < maxN; i++) widths.push(280, 280, 240, 260)
-  widths.push(...Array(5).fill(130))
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    70, 195, 240, 220,
+    ...Array(12).fill(85), ...Array(12).fill(85),
+    ...Array(4).fill(105), ...Array(5).fill(120),
+    ...Array(5).fill(140),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
 
-// ─── Feuille 3 : Matières premières (une ligne par entreprise, groupe par matière) ─
 
 function buildMatieresSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.materials)
-  const headers = ['Promoteur', 'Entreprise', 'Nb matières', 'Matières (noms)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Coût unitaire mensuel Ar (Matière ${n})`,
-      `Quantités mensuelles (Matière ${n})`,
-      `Croissance annuelle % An2-5 (Matière ${n})`,
-    )
-  }
-  headers.push(...YEARS.map((y) => `Coût total ${y} (Ar)`))
+  const headers = [
+    'id', 'Promoteur', 'Entreprise', 'Matières (noms)',
+    ...monthHeaders('Coût unitaire Ar'),
+    ...monthHeaders('Qté'),
+    ...yearHeaders('Croissance %', YEARS.slice(1)),
+    ...yearHeaders('Coût Ar'),
+    ...YEARS.map((y) => `Coût total ${y} (Ar)`),
+  ]
+  const totalColCount = 5
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full }) => {
-    const materials = full.materials
-    const totalByYear = Array.from({ length: 5 }, (_, y) => materials.reduce((s, m) => s + materialCostByYear(m, y), 0))
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(materials.length),
-      lblC(joinList(materials.map((m) => m.name))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const m = materials[i]
-      if (!m) {
-        for (let k = 0; k < 3; k++) row.push(lblC('-'))
-      } else {
-        row.push(lblC(paren(m.monthlyUnitCost)), lblC(paren(m.monthlyQty)), lblC(paren(m.growthRates)))
-      }
-    }
-    row.push(...totalByYear.map((v) => num(v)))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.materials,
+    (m, ctx) => {
+      const totalByYear = Array.from({ length: 5 }, (_, y) =>
+        ctx.full.materials.reduce((s, mm) => s + materialCostByYear(mm, y), 0),
+      )
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(m.name),
+        ...monthCols(m.monthlyUnitCost),
+        ...monthCols(m.monthlyQty),
+        ...yearCols(m.growthRates, YEARS.slice(1)),
+        ...yearCols(Array.from({ length: 5 }, (_, y) => materialCostByYear(m, y))),
+        ...totalByYear.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 125, 260]
-  for (let i = 0; i < maxN; i++) widths.push(280, 280, 240)
-  widths.push(...Array(5).fill(130))
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    70, 195, 240, 220,
+    ...Array(12).fill(85), ...Array(12).fill(85),
+    ...Array(4).fill(105), ...Array(5).fill(120),
+    ...Array(5).fill(140),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
 
-// ─── Feuille 4 : Personnel (une ligne par entreprise, groupe par poste) ────────
 
 function buildPersonnelSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.staffMembers)
-  const headers = ['Promoteur', 'Entreprise', 'Nb postes', 'Postes (noms)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Salaire mensuel Ar (Poste ${n})`,
-      `Effectif (Poste ${n})`,
-      `Taux de charges % (Poste ${n})`,
-      `Croissance annuelle % An2-5 (Poste ${n})`,
-      `Coût annuel An1-5 Ar (Poste ${n})`,
-    )
-  }
-  headers.push(...YEARS.map((y) => `Coût total ${y} (Ar)`))
+  const headers = [
+    'id', 'Promoteur', 'Entreprise', 'Postes (noms)',
+    'Salaire mensuel Ar', 'Effectif', 'Taux de charges %',
+    ...yearHeaders('Croissance %', YEARS.slice(1)),
+    ...yearHeaders('Coût Ar'),
+    ...YEARS.map((y) => `Coût total ${y} (Ar)`),
+  ]
+  const totalColCount = 5
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full }) => {
-    const staff = full.staffMembers
-    const totalByYear = Array.from({ length: 5 }, (_, y) => staff.reduce((s, st) => s + staffAnnualCostByYear(st, y), 0))
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(staff.length),
-      lblC(joinList(staff.map((s) => s.roleName))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const s = staff[i]
-      if (!s) {
-        for (let k = 0; k < 5; k++) row.push(lblC('-'))
-      } else {
-        row.push(
-          numC(s.monthlySalary),
-          numC(s.headcount),
-          numC(s.chargesRate),
-          lblC(paren(s.growthRates)),
-          lblC(paren(Array.from({ length: 5 }, (_, y) => staffAnnualCostByYear(s, y)))),
-        )
-      }
-    }
-    row.push(...totalByYear.map((v) => num(v)))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.staffMembers,
+    (s, ctx) => {
+      const totalByYear = Array.from({ length: 5 }, (_, y) =>
+        ctx.full.staffMembers.reduce((sum, st) => sum + staffAnnualCostByYear(st, y), 0),
+      )
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(s.roleName),
+        numC(s.monthlySalary),
+        numC(s.headcount),
+        numC(s.chargesRate),
+        ...yearCols(s.growthRates, YEARS.slice(1)),
+        ...yearCols(Array.from({ length: 5 }, (_, y) => staffAnnualCostByYear(s, y))),
+        ...totalByYear.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 115, 260]
-  for (let i = 0; i < maxN; i++) widths.push(200, 120, 180, 240, 280)
-  widths.push(...Array(5).fill(140))
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    70, 195, 240, 220, 200, 120, 180,
+    ...Array(4).fill(110), ...Array(5).fill(120),
+    ...Array(5).fill(140),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
 
-// ─── Feuille 5 : Charges (une ligne par entreprise, groupe par charge) ─────────
 
 function buildChargesSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.expenses)
-  const headers = ['Promoteur', 'Entreprise', 'Nb charges', 'Charges (noms)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Montant mensuel Ar (Charge ${n})`,
-      `Présence saisonnière par mois (Charge ${n})`,
-      `Inflation annuelle % An2-5 (Charge ${n})`,
-      `Total An1-5 Ar (Charge ${n})`,
-    )
-  }
-  headers.push(...YEARS.map((y) => `Total ${y} (Ar)`))
+  const headers = [
+    'id', 'Promoteur', 'Entreprise', 'Charges (noms)',
+    ...monthHeaders('Montant Ar'),
+    ...monthHeaders('Présence'),
+    ...yearHeaders('Inflation %', YEARS.slice(1)),
+    ...yearHeaders('Total Ar'),
+    ...YEARS.map((y) => `Total ${y} (Ar)`),
+  ]
+  const totalColCount = 5
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full }) => {
-    const exp = full.expenses
-    const totalByYear = Array.from({ length: 5 }, (_, y) => exp.reduce((s, e) => s + expenseTotalByYear(e, y), 0))
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(exp.length),
-      lblC(joinList(exp.map((e) => e.name))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const e = exp[i]
-      if (!e) {
-        for (let k = 0; k < 4; k++) row.push(lblC('-'))
-      } else {
-        row.push(
-          lblC(paren(e.monthlyAmounts)),
-          lblC(paren(e.seasonality)),
-          lblC(paren(e.inflationGrowth)),
-          lblC(paren(Array.from({ length: 5 }, (_, y) => expenseTotalByYear(e, y)))),
-        )
-      }
-    }
-    row.push(...totalByYear.map((v) => num(v)))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.expenses,
+    (e, ctx) => {
+      const totalByYear = Array.from({ length: 5 }, (_, y) =>
+        ctx.full.expenses.reduce((s, ee) => s + expenseTotalByYear(ee, y), 0),
+      )
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(e.name),
+        ...monthCols(e.monthlyAmounts),
+        ...monthCols(e.seasonality),
+        ...yearCols(e.inflationGrowth, YEARS.slice(1)),
+        ...yearCols(Array.from({ length: 5 }, (_, y) => expenseTotalByYear(e, y))),
+        ...totalByYear.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 115, 260]
-  for (let i = 0; i < maxN; i++) widths.push(280, 280, 240, 260)
-  widths.push(...Array(5).fill(130))
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    70, 195, 240, 220,
+    ...Array(12).fill(85), ...Array(12).fill(85),
+    ...Array(4).fill(105), ...Array(5).fill(120),
+    ...Array(5).fill(140),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
-
-// ─── Feuille 6 : Investissements amortissables (groupe par investissement) ───
 
 function buildInvestissementsSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.investments)
-  const headers = ['Promoteur', 'Entreprise', 'Nb investissements', 'Investissements (désignations)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Montant Ar (Investissement ${n})`,
-      `Durée amort. ans (Investissement ${n})`,
-      `Type d'équipement (Investissement ${n})`,
-      `Type d'apport (Investissement ${n})`,
-      `Fonds propres Ar / % (Investissement ${n})`,
-      `Subvention Ar / % (Investissement ${n})`,
-      `Emprunt Ar / % (Investissement ${n})`,
-      `Taux et durée emprunt (Investissement ${n})`,
-      `Amortissement annuel Ar (Investissement ${n})`,
-      `VNC An1-5 Ar (Investissement ${n})`,
-    )
-  }
-  headers.push('Total investissement (Ar)', 'Total fonds propres (Ar)', 'Total subvention (Ar)', 'Total emprunt (Ar)')
-  headers.push(...YEARS.map((y) => `VNC totale ${y} (Ar)`))
+  const headers = [
+    'id', 'Promoteur', 'Entreprise', 'Investissements (désignations)',
+    'Montant Ar', 'Durée amort. ans', "Type d'équipement", "Type d'apport",
+    'Fonds propres (Ar)', 'Fonds propres (%)',
+    'Subvention (Ar)', 'Subvention (%)',
+    'Emprunt (Ar)', 'Emprunt (%)',
+    'Taux emprunt (%)', 'Durée emprunt (ans)',
+    'Amortissement annuel Ar', ...yearHeaders('VNC Ar'),
+    'Total investissement (Ar)', 'Total fonds propres (Ar)', 'Total subvention (Ar)', 'Total emprunt (Ar)',
+    ...YEARS.map((y) => `VNC totale ${y} (Ar)`),
+  ]
+  const totalColCount = 4 + 5
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full, result }) => {
-    const inv = full.investments
-    const depByInv = new Map(result.depreciationTable.byInvestment.map((d) => [d.investmentId, d]))
-    const totalInvest = inv.reduce((s, i) => s + i.amount, 0)
-    const totalEquity = inv.reduce((s, i) => s + i.financedEquity, 0)
-    const totalGrant  = inv.reduce((s, i) => s + i.financedGrant, 0)
-    const totalLoan   = inv.reduce((s, i) => s + i.financedLoan, 0)
-    const vncTotalByYear = Array.from({ length: 5 }, (_, y) =>
-      inv.reduce((s, i) => s + (depByInv.get(i.id)?.yearlyBook[y] ?? 0), 0),
-    )
-    const pct = (part: number, total: number) => (total > 0 ? Math.round((part / total) * 1000) / 10 : 0)
+  const pct = (part: number, total: number) => (total > 0 ? Math.round((part / total) * 1000) / 10 : 0)
 
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(inv.length),
-      lblC(joinList(inv.map((i) => i.name))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const it = inv[i]
-      if (!it) {
-        for (let k = 0; k < 10; k++) row.push(lblC('-'))
-      } else {
-        const dep = depByInv.get(it.id)
-        row.push(
-          numC(it.amount),
-          numC(it.usefulLife),
-          lblC(it.equipmentType === 'electrique' ? 'Électrique' : 'Non électrique'),
-          lblC(it.contributionType === 'nature' ? 'Apport en nature' : 'Apport financier'),
-          lblC(`${fmtNum(it.financedEquity)} (${fmtNum(pct(it.financedEquity, it.amount))}%)`),
-          lblC(`${fmtNum(it.financedGrant)} (${fmtNum(pct(it.financedGrant, it.amount))}%)`),
-          lblC(`${fmtNum(it.financedLoan)} (${fmtNum(pct(it.financedLoan, it.amount))}%)`),
-          lblC(`${fmtNum(it.loanRate)}% / ${fmtNum(it.loanYears)} ans`),
-          numC(it.usefulLife > 0 ? Math.round(it.amount / it.usefulLife) : 0),
-          lblC(paren(Array.from({ length: 5 }, (_, y) => dep?.yearlyBook[y] ?? 0))),
-        )
-      }
-    }
-    row.push(num(totalInvest), num(totalEquity), num(totalGrant), num(totalLoan))
-    row.push(...vncTotalByYear.map((v) => num(v)))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.investments,
+    (it, ctx) => {
+      const inv = ctx.full.investments
+      const depByInv = new Map(ctx.result.depreciationTable.byInvestment.map((d) => [d.investmentId, d]))
+      const totalInvest = inv.reduce((s, i) => s + i.amount, 0)
+      const totalEquity = inv.reduce((s, i) => s + i.financedEquity, 0)
+      const totalGrant  = inv.reduce((s, i) => s + i.financedGrant, 0)
+      const totalLoan   = inv.reduce((s, i) => s + i.financedLoan, 0)
+      const vncTotalByYear = Array.from({ length: 5 }, (_, y) =>
+        inv.reduce((s, i) => s + (depByInv.get(i.id)?.yearlyBook[y] ?? 0), 0),
+      )
+      const dep = depByInv.get(it.id)
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(it.name),
+        numC(it.amount),
+        numC(it.usefulLife),
+        lblC(it.equipmentType === 'electrique' ? 'Électrique' : 'Non électrique'),
+        lblC(it.contributionType === 'nature' ? 'Apport en nature' : 'Apport financier'),
+        numC(it.financedEquity), numC(pct(it.financedEquity, it.amount)),
+        numC(it.financedGrant), numC(pct(it.financedGrant, it.amount)),
+        numC(it.financedLoan), numC(pct(it.financedLoan, it.amount)),
+        numC(it.loanRate), numC(it.loanYears),
+        numC(it.usefulLife > 0 ? Math.round(it.amount / it.usefulLife) : 0),
+        ...yearCols(Array.from({ length: 5 }, (_, y) => dep?.yearlyBook[y] ?? 0)),
+        numC(totalInvest), numC(totalEquity), numC(totalGrant), numC(totalLoan),
+        ...vncTotalByYear.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 130, 280]
-  for (let i = 0; i < maxN; i++) widths.push(150, 160, 180, 200, 220, 220, 220, 200, 220, 280)
-  widths.push(150, 150, 150, 150)
-  widths.push(...Array(5).fill(130))
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    70, 195, 240, 240,
+    150, 160, 180, 200,
+    160, 110, 160, 110, 160, 110, 130, 140,
+    220, ...Array(5).fill(120),
+    150, 150, 150, 150,
+    ...Array(5).fill(130),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
 
-// ─── Feuille 7 : Investissements non amortissables (groupe par élément) ──────
 
 function buildInvestTerrainSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.full.investmentTerrains)
-  const headers = ['Promoteur', 'Entreprise', 'Nb éléments', 'Investissements non amortis (désignations)']
-  for (let i = 0; i < maxN; i++) headers.push(`Montant Ar (Élément ${i + 1})`)
-  headers.push('Total (Ar)')
+  const headers = ['id', 'Promoteur', 'Entreprise', 'Investissements non amortis (désignations)', 'Nature', 'Montant Ar', 'Total (Ar)']
+  const totalColCount = 1
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, full }) => {
-    const it = full.investmentTerrains
-    const total = it.reduce((s, x) => s + x.amount, 0)
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(it.length),
-      lblC(joinList(it.map((x) => x.name))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const x = it[i]
-      row.push(x ? numC(x.amount) : lblC('-'))
-    }
-    row.push(num(total))
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.full.investmentTerrains,
+    (x, ctx) => {
+      const total = ctx.full.investmentTerrains.reduce((s, xx) => s + xx.amount, 0)
+      return [
+        numC(ctx.company.id),
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(x.name),
+        lblC(x.natureType === 'immateriel' ? 'Immatériel' : 'Physique'),
+        numC(x.amount),
+        numC(total),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 120, 280, ...Array(maxN).fill(170), 150]
-  return buildSheet(headers, rows, widths)
+  const widths = [70, 195, 240, 280, 120, 170, 150]
+  return buildSheet(headers, rows, widths, merges)
 }
 
-// ─── Feuille 8 : Financements additionnels (une ligne par entreprise, séries An1-5) ─
 
 function buildFinancementsSheet(contexts: CompanyContext[]): Record<string, unknown> {
   const headers = [
     'Promoteur', 'Entreprise',
-    'Fonds propres An1-5 (Ar)', 'Emprunt An1-5 (Ar)',
-    'Taux emprunt An1-5 (%)', 'Durée emprunt An1-5 (ans)', 'Subvention An1-5 (Ar)',
+    ...yearHeaders('Fonds propres Ar'),
+    ...yearHeaders('Emprunt Ar'),
+    ...yearHeaders('Taux emprunt %'),
+    ...yearHeaders('Durée emprunt ans'),
+    ...yearHeaders('Subvention Ar'),
   ]
   const rows = contexts.map(({ company, full }) => {
     const f = full.additionalFundings
     const seriesFor = (getV: (x: (typeof f)[number]) => number) =>
-      paren(Array.from({ length: 5 }, (_, y) => {
+      Array.from({ length: 5 }, (_, y) => {
         const item = f.find((x) => x.yearNumber === y + 1)
         return item ? getV(item) : 0
-      }))
+      })
     return [
       lbl(normalize(company.promoteur), true),
       lbl(company.name),
-      lblC(seriesFor((x) => x.equity)),
-      lblC(seriesFor((x) => x.loan)),
-      lblC(seriesFor((x) => x.loanRate)),
-      lblC(seriesFor((x) => x.loanYears)),
-      lblC(seriesFor((x) => x.grant)),
+      ...yearCols(seriesFor((x) => x.equity)),
+      ...yearCols(seriesFor((x) => x.loan)),
+      ...yearCols(seriesFor((x) => x.loanRate)),
+      ...yearCols(seriesFor((x) => x.loanYears)),
+      ...yearCols(seriesFor((x) => x.grant)),
     ]
   })
-  return buildSheet(headers, rows, [195, 240, 280, 280, 240, 240, 280])
+  return buildSheet(headers, rows, [195, 240, ...Array(25).fill(110)])
 }
 
 
@@ -594,13 +596,13 @@ function pivotSheet(
   contexts: CompanyContext[],
   indicators: { label: string; get: (r: FullCalculationResult) => number[] }[],
 ): Record<string, unknown> {
-  const headers = ['Promoteur', 'Entreprise', ...indicators.map((i) => `${i.label} An1→An5 (Ar)`)]
+  const headers = ['Promoteur', 'Entreprise', ...indicators.flatMap((i) => yearHeaders(i.label))]
   const rows = contexts.map(({ company, result }) => [
     lbl(normalize(company.promoteur), true),
     lbl(company.name),
-    ...indicators.map(({ get }) => lblC(paren(get(result)))),
+    ...indicators.flatMap(({ get }) => yearCols(get(result))),
   ])
-  const widths = [195, 240, ...indicators.map(() => 260)]
+  const widths = [195, 240, ...indicators.flatMap(() => Array(5).fill(120))]
   return buildSheet(headers, rows, widths)
 }
 
@@ -673,8 +675,6 @@ function buildPlanFinancementSheet(contexts: CompanyContext[]): Record<string, u
   ])
 }
 
-// ─── Feuille : Rentabilité (une ligne par entreprise) ─────────────────────────
-
 function buildRentabiliteSheet(contexts: CompanyContext[]): Record<string, unknown> {
   const headers = [
     'Promoteur', 'Entreprise',
@@ -700,52 +700,50 @@ function buildRentabiliteSheet(contexts: CompanyContext[]): Record<string, unkno
   return buildSheet(headers, rows, [195, 240, 160, 140, 160, 130, 160, 140, 160, 130])
 }
 
-// ─── Feuille : Emprunts (une ligne par entreprise, groupe par emprunt) ────────
 
 function buildEmpruntsSheet(contexts: CompanyContext[]): Record<string, unknown> {
-  const maxN = maxCount(contexts, (ctx) => ctx.result.loanRepaymentTable.byLoan)
-  const headers = ['Promoteur', 'Entreprise', 'Nb emprunts', 'Emprunts (libellés)']
-  for (let i = 0; i < maxN; i++) {
-    const n = i + 1
-    headers.push(
-      `Principal Ar (Emprunt ${n})`,
-      `Taux % (Emprunt ${n})`,
-      `Durée ans (Emprunt ${n})`,
-      `Capital remboursé par an Ar (Emprunt ${n})`,
-      `Intérêts par an Ar (Emprunt ${n})`,
-      `Solde restant par an Ar (Emprunt ${n})`,
-    )
-  }
+  const headers = [
+    'Promoteur', 'Entreprise', 'Emprunts (libellés)',
+    'Principal Ar', 'Taux %', 'Durée ans',
+    ...yearHeaders('Capital remboursé Ar'),
+    ...yearHeaders('Intérêts Ar'),
+    ...yearHeaders('Solde restant Ar'),
+    ...YEARS.map((y) => `Capital total remboursé ${y} (Ar)`),
+    ...YEARS.map((y) => `Intérêts totaux ${y} (Ar)`),
+  ]
+  const totalColCount = 10
+  const totalStartCol = headers.length - totalColCount
 
-  const rows = contexts.map(({ company, result }) => {
-    const loans = result.loanRepaymentTable.byLoan
-    const row: object[] = [
-      lbl(normalize(company.promoteur), true),
-      lbl(company.name),
-      numC(loans.length),
-      lblC(joinList(loans.map((l) => l.label))),
-    ]
-    for (let i = 0; i < maxN; i++) {
-      const l = loans[i]
-      if (!l) {
-        for (let k = 0; k < 6; k++) row.push(lblC('-'))
-      } else {
-        row.push(
-          numC(l.principal),
-          numC(l.rate),
-          numC(l.years),
-          lblC(paren(l.annualPayments.map((p) => p.capital))),
-          lblC(paren(l.annualPayments.map((p) => p.interest))),
-          lblC(paren(l.annualPayments.map((p) => p.balance))),
-        )
-      }
-    }
-    return row
-  })
+  const { rows, merges } = buildLongFormatRows(
+    contexts,
+    (ctx) => ctx.result.loanRepaymentTable.byLoan,
+    (l, ctx) => {
+      const totalCapital = ctx.result.loanRepaymentTable.totalCapitalByYear
+      const totalInterest = ctx.result.loanRepaymentTable.totalInterestByYear
+      return [
+        lbl(normalize(ctx.company.promoteur), true),
+        lbl(ctx.company.name),
+        lblC(l.label),
+        numC(l.principal),
+        numC(l.rate),
+        numC(l.years),
+        ...yearCols(l.annualPayments.map((p) => p.capital)),
+        ...yearCols(l.annualPayments.map((p) => p.interest)),
+        ...yearCols(l.annualPayments.map((p) => p.balance)),
+        ...totalCapital.map((v) => numC(v)),
+        ...totalInterest.map((v) => numC(v)),
+      ]
+    },
+    totalStartCol,
+    totalColCount,
+  )
 
-  const widths = [195, 240, 130, 280]
-  for (let i = 0; i < maxN; i++) widths.push(160, 140, 140, 300, 300, 300)
-  return buildSheet(headers, rows, widths)
+  const widths = [
+    195, 240, 240, 160, 140, 140,
+    ...Array(5).fill(130), ...Array(5).fill(130), ...Array(5).fill(130),
+    ...Array(10).fill(150),
+  ]
+  return buildSheet(headers, rows, widths, merges)
 }
 
 export async function exportDashboardToExcel(

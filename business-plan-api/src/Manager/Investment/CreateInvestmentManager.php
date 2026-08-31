@@ -19,9 +19,9 @@ class CreateInvestmentManager
 
     /**
      * @param array{name: string, amount?: int, usefulLife?: int,
-     *              financedEquity?: int, financedLoan?: int, financedGrant?: int,
-     *              loanRate?: float, loanYears?: int, equipmentType?: ?string,
-     *              contributionType?: string} $data
+     *              equipmentType?: ?string, financedEquity?: int, contributionType?: string,
+     *              financedLoan?: int, financedGrant?: int,
+     *              loanRate?: float, loanYears?: int} $data
      */
     public function create(Company $company, User $modifiedBy, array $data = []): Investment
     {
@@ -33,13 +33,13 @@ class CreateInvestmentManager
         $investment->setName($data['name'] ?? 'Immobilisation');
         $investment->setAmount((int) ($data['amount'] ?? 0));
         $investment->setUsefulLife((int) ($data['usefulLife'] ?? 5));
+        $investment->setEquipmentType($data['equipmentType'] ?? null);
         $investment->setFinancedEquity((int) ($data['financedEquity'] ?? 0));
+        $investment->setContributionType((string) ($data['contributionType'] ?? 'financier'));
         $investment->setFinancedLoan((int) ($data['financedLoan'] ?? 0));
         $investment->setFinancedGrant((int) ($data['financedGrant'] ?? 0));
         $investment->setLoanRate((float) ($data['loanRate'] ?? 0.0));
         $investment->setLoanYears((int) ($data['loanYears'] ?? 5));
-        $investment->setEquipmentType($data['equipmentType'] ?? null);
-        $investment->setContributionType($data['contributionType'] ?? 'financier');
         $investment->setSortOrder($nextOrder);
         $company->setLastModifiedBy($modifiedBy);
 

@@ -48,4 +48,22 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * Un utilisateur actif admin/manager quelconque — utilisé par
+     * app:cache-dashboard-exports comme contexte de visibilité pour la
+     * pré-génération (admin/manager ont toujours isCanView() = true, donc
+     * les données visibles sont les mêmes quel que soit celui choisi ici).
+     */
+    public function findOneActiveCanExport(): ?User
+    {
+        return $this->createQueryBuilder('u')
+            ->where('u.isActive = true')
+            ->andWhere('u.role IN (:roles)')
+            ->setParameter('roles', ['admin', 'manager'])
+            ->orderBy('u.id', 'ASC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
 }

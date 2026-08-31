@@ -41,13 +41,13 @@ class UpdateInvestmentController extends AbstractController
             'name'             => $investment->getName(),
             'amount'           => $investment->getAmount(),
             'usefulLife'       => $investment->getUsefulLife(),
+            'equipmentType'    => $investment->getEquipmentType(),
             'financedEquity'   => $investment->getFinancedEquity(),
+            'contributionType' => $investment->getContributionType(),
             'financedLoan'     => $investment->getFinancedLoan(),
             'financedGrant'    => $investment->getFinancedGrant(),
             'loanRate'         => $investment->getLoanRate(),
             'loanYears'        => $investment->getLoanYears(),
-            'equipmentType'    => $investment->getEquipmentType(),
-            'contributionType' => $investment->getContributionType(),
             'sortOrder'        => $investment->getSortOrder(),
         ]);
     }

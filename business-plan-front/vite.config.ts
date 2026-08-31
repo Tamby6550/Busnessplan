@@ -37,10 +37,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Stratégie : Network First pour l'API, Cache First pour les assets
         runtimeCaching: [
           {
-            // Assets statiques (JS, CSS, fonts) → Cache First
             urlPattern: /\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg)$/,
             handler: 'CacheFirst',
             options: {
@@ -49,7 +47,6 @@ export default defineConfig({
             },
           },
           {
-            // API Symfony → Network First (avec fallback cache si offline)
             urlPattern: /^\/api\//,
             handler: 'NetworkFirst',
             options: {
@@ -59,12 +56,10 @@ export default defineConfig({
             },
           },
         ],
-        // Ne pas mettre en cache les routes de navigation (React Router gère cela)
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api/],
       },
       devOptions: {
-        // Active le Service Worker en mode développement
         enabled: true,
         type: 'module',
       },

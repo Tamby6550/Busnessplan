@@ -39,10 +39,11 @@ class UpdateInvestmentTerrainController extends AbstractController
         $this->updateInvestmentTerrainManager->update($investment, $user, $body);
 
         return $this->json([
-            'id'        => $investment->getId(),
-            'name'      => $investment->getName(),
-            'amount'    => $investment->getAmount(),
-            'sortOrder' => $investment->getSortOrder(),
+            'id'         => $investment->getId(),
+            'name'       => $investment->getName(),
+            'amount'     => $investment->getAmount(),
+            'natureType' => $investment->getNatureType(),
+            'sortOrder'  => $investment->getSortOrder(),
         ]);
     }
 }

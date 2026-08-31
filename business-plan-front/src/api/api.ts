@@ -269,6 +269,7 @@ export const investmentTerrainApi = {
     data: {
       name: string
       amount?: number
+      natureType?: 'immateriel' | 'physique'
     },
   ) =>
     request<import('@/types').InvestmentTerrain>(`/companies/${companyId}/investment-terrains`, {

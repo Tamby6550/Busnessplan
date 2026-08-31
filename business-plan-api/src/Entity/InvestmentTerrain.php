@@ -35,6 +35,11 @@ class InvestmentTerrain
     #[ORM\Column(type: 'bigint', options: ['default' => 0])]
     private int $amount = 0;
 
+    // Nature de l'investissement : immatériel (brevet, fonds de commerce...) ou physique (terrain, bâtiment...)
+    #[ORM\Column(type: 'string', length: 20, options: ['default' => 'physique'])]
+    #[Assert\Choice(choices: ['immateriel', 'physique'])]
+    private string $natureType = 'physique';
+
     #[ORM\Column(type: 'smallint', options: ['default' => 0])]
     private int $sortOrder = 0;
 
@@ -66,6 +71,9 @@ class InvestmentTerrain
 
     public function getAmount(): int { return (int) $this->amount; }
     public function setAmount(int $amount): static { $this->amount = $amount; return $this; }
+
+    public function getNatureType(): string { return $this->natureType; }
+    public function setNatureType(string $natureType): static { $this->natureType = $natureType; return $this; }
 
     public function getSortOrder(): int { return $this->sortOrder; }
     public function setSortOrder(int $sortOrder): static { $this->sortOrder = $sortOrder; return $this; }

@@ -22,6 +22,11 @@ security:
         # Basic (identifiants BusinessPlanA habituels) au lieu du JWT, car Power Query
         # "Obtenir des données → À partir du Web" avec type d'authentification "Basic"
         # envoie l'en-tête Authorization à chaque requête sans étape de login séparée.
+        # Le JWT est également accepté sur ce même firewall : c'est ce qui permet au
+        # bouton "Télécharger" du modal (dans l'application) de récupérer le fichier
+        # avec le token de connexion déjà en place, sans redemander de mot de passe —
+        # les deux authentificateurs coexistent, chacun ne réagissant qu'à son propre
+        # format d'en-tête ("Authorization: Basic ..." vs "Authorization: Bearer ...").
         # DOIT rester déclaré AVANT le firewall "main" : Symfony évalue les firewalls
         # dans l'ordre et retient le premier pattern qui correspond.
         export:
@@ -29,7 +34,9 @@ security:
             stateless: true
             provider: app_user_provider
             user_checker: App\Security\UserChecker
+            entry_point: http_basic
             http_basic: ~
+            jwt: ~
 
         # Firewall unique pour le reste de l'API (recommandé par Lexik JWT)
         main:

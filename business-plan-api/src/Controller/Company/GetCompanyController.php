@@ -133,10 +133,11 @@ class GetCompanyController extends AbstractController
                 'sortOrder'        => $i->getSortOrder(),
             ], $company->getInvestments()->toArray()),
             'investmentTerrains' => array_map(fn ($i) => [
-                'id'        => $i->getId(),
-                'name'      => $i->getName(),
-                'amount'    => $i->getAmount(),
-                'sortOrder' => $i->getSortOrder(),
+                'id'         => $i->getId(),
+                'name'       => $i->getName(),
+                'amount'     => $i->getAmount(),
+                'natureType' => $i->getNatureType(),
+                'sortOrder'  => $i->getSortOrder(),
             ], $company->getInvestmentTerrains()->toArray()),
             'additionalFundings' => array_map(fn ($f) => [
                 'yearNumber' => $f->getYearNumber(),
