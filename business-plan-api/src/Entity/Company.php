@@ -260,6 +260,11 @@ class Company
     public function setSettings(?CompanySettings $settings): static { $this->settings = $settings; return $this; }
 
     public function getSnapshot(): ?CompanySnapshot { return $this->snapshot; }
+    /**
+     * Côté inverse de la relation : n'écrit rien en base, mais permet de renvoyer
+     * une entreprise tout juste dupliquée avec ses KPI déjà renseignés.
+     */
+    public function setSnapshot(?CompanySnapshot $snapshot): static { $this->snapshot = $snapshot; return $this; }
 
     public function getProducts(): Collection { return $this->products; }
     public function getMaterials(): Collection { return $this->materials; }

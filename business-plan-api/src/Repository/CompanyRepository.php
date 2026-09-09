@@ -39,4 +39,21 @@ class CompanyRepository extends ServiceEntityRepository
             ->getQuery()
             ->getOneOrNullResult();
     }
+
+    /**
+     * Noms des entreprises d'un projet — sert à calculer un nom de copie libre
+     * dans le projet cible sans charger les entités.
+     * @return string[]
+     */
+    public function findNamesByProject(int $projectId): array
+    {
+        $rows = $this->createQueryBuilder('c')
+            ->select('c.name')
+            ->where('c.project = :projectId')
+            ->setParameter('projectId', $projectId)
+            ->getQuery()
+            ->getScalarResult();
+
+        return array_column($rows, 'name');
+    }
 }

@@ -59,6 +59,16 @@ export function canExport(role: UserRole): boolean {
   return role === 'admin' || role === 'manager'
 }
 
+/**
+ * Dupliquer un projet entier, ou copier une entreprise vers un autre projet.
+ * Réservé aux administrateurs et managers : ces actions recopient toutes les
+ * entreprises d'un projet, y compris celles qu'un rôle plus restreint ne voit pas.
+ * Le serveur applique la même règle — masquer le bouton ne suffit pas.
+ */
+export function canDuplicateProject(role: UserRole): boolean {
+  return role === 'admin' || role === 'manager'
+}
+
 export function safeRole(role: string | undefined | null): UserRole {
   const valid: UserRole[] = ['admin', 'manager', 'editor', 'viewer', 'standard']
   return valid.includes(role as UserRole) ? (role as UserRole) : 'standard'

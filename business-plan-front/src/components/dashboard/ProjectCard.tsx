@@ -4,7 +4,8 @@ import CompanyCard from '@/components/dashboard/CompanyCard'
 import ColumnFilterDropdown from '@/components/ui/ColumnFilterDropdown'
 import RangeFilterDropdown, { type NumRange } from '@/components/ui/RangeFilterDropdown'
 import { useAuthStore } from '@/stores/authStore'
-import { canExport, canSeeAll, canValidate, safeRole } from '@/utils/permissions'
+import { useNetworkStore } from '@/stores/networkStore'
+import { canDuplicateProject, canExport, canSeeAll, canValidate, safeRole } from '@/utils/permissions'
 import ExportLinkModal from '@/components/dashboard/ExportLinkModal'
 
 type FilterKey = 'entreprise' | 'secteur' | 'promoteur' | 'creePar' | 'statut'
@@ -23,6 +24,9 @@ interface Props {
   onAddCompany: () => void
   onDeleteCompany: (companyId: number) => void
   onDuplicateCompany: (companyId: number) => void
+  onDuplicateProject: () => void
+  onEditProject: () => void
+  onCopyCompany: (company: CompanySummary) => void
   onOpenEditor: (companyId: number) => void
   onValidateCompany: (companyId: number) => void
   onUnvalidateCompany: (companyId: number) => void
@@ -58,6 +62,9 @@ export default function ProjectCard({
   onAddCompany,
   onDeleteCompany,
   onDuplicateCompany,
+  onDuplicateProject,
+  onEditProject,
+  onCopyCompany,
   onOpenEditor,
   onValidateCompany,
   onUnvalidateCompany,
@@ -68,6 +75,14 @@ export default function ProjectCard({
   const userCanSeeAll = canSeeAll(role)
   const userCanValidate = canValidate(role)
   const userCanExport = canExport(role)
+  // Dupliquer un projet ou copier une entreprise crée de la donnée à partir
+  // d'entreprises que l'utilisateur ne voit pas forcément toutes : réservé aux
+  // administrateurs et managers, contrôle également appliqué côté serveur.
+  const userCanDuplicate = canDuplicateProject(role)
+  // Duplication et copie créent trop d'objets liés pour être rejouées depuis la
+  // file de synchronisation hors ligne : on désactive plutôt que de laisser
+  // l'utilisateur lancer une action qui échouera sans laisser de trace.
+  const isOnline = useNetworkStore((s) => s.isOnline)
 
   const [isOpen, setIsOpen] = useState(true)
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
@@ -129,7 +144,19 @@ export default function ProjectCard({
             <i className="fas fa-chevron-down" style={{ fontSize: 11, color: 'var(--color-text-muted)' }} />
           </span>
           <div>
-            <div className="card-title">{project.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="card-title">{project.name}</div>
+              {userCanDuplicate && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: 'var(--color-text-muted)', padding: '2px 6px' }}
+                  onClick={(e) => { e.stopPropagation(); onEditProject() }}
+                  title="Modifier le nom et la description du projet"
+                >
+                  <i className="fas fa-pencil" style={{ fontSize: 12 }} />
+                </button>
+              )}
+            </div>
             {project.description && (
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: 2 }}>
                 {project.description}
@@ -166,6 +193,19 @@ export default function ProjectCard({
           <button className="btn btn-secondary btn-sm" onClick={onAddCompany}>
             + Nouveau entreprise
           </button>
+          {userCanDuplicate && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onDuplicateProject}
+              disabled={!isOnline}
+              title={isOnline
+                ? 'Créer une copie de ce projet avec toutes ses entreprises'
+                : 'Disponible uniquement en ligne'}
+            >
+              <i className="fas fa-clone" style={{ marginRight: 6 }} />
+              Dupliquer ce projet
+            </button>
+          )}
           {isAdmin && (
             <button
               className="btn btn-ghost btn-sm"
@@ -429,6 +469,30 @@ export default function ProjectCard({
                                     style={{ background: 'none', border: 'none', color: '#E24B4A', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: '2px 4px' }}
                                     onClick={() => onUnvalidateCompany(company.id)}
                                   >Invalider</button>
+                                )}
+                                {userCanDuplicate && (
+                                  <button
+                                    className="btn btn-sm"
+                                    style={{
+                                      // Fond gris léger : "Copie" est une action neutre, entre
+                                      // "Valider" (vert/rouge, texte seul) et la corbeille rouge —
+                                      // sans fond elle se confondait avec le libellé de statut.
+                                      background: 'var(--color-bg, #f1f5f9)',
+                                      border: '1px solid var(--color-border, #e2e8f0)',
+                                      color: 'var(--color-text, #475569)',
+                                      fontWeight: 600,
+                                      fontSize: 13,
+                                      padding: '4px 10px',
+                                    }}
+                                    onClick={() => onCopyCompany(company)}
+                                    disabled={!isOnline}
+                                    title={isOnline
+                                      ? 'Copier cette entreprise vers un ou plusieurs projets'
+                                      : 'Disponible uniquement en ligne'}
+                                  >
+                                    Copie
+                                    <i className="fas fa-copy" style={{ fontSize: 13, marginLeft: 6 }} />
+                                  </button>
                                 )}
                                 {(isAdmin || isMyCompany) && (
                                   <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => onDeleteCompany(company.id)} title="Supprimer">

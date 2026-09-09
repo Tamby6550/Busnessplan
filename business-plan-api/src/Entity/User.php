@@ -207,6 +207,12 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         return in_array($this->role, ['admin', 'manager'], true);
     }
 
+    /** Peut dupliquer un projet entier et copier une entreprise vers un autre projet (admin, manager) */
+    public function isCanDuplicateProject(): bool
+    {
+        return in_array($this->role, ['admin', 'manager'], true);
+    }
+
     public function isActive(): bool { return $this->isActive; }
     public function setIsActive(bool $isActive): static { $this->isActive = $isActive; return $this; }
 

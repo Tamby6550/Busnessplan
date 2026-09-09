@@ -7,6 +7,30 @@ L'application est en production avec des données réelles en base. Règles suiv
 
 ---
 
+## 2026-09-09
+
+**Backend + Frontend — Duplication d'un projet entier et copie d'une entreprise vers d'autres projets**
+- Nouveau bouton « Dupliquer ce projet » dans l'en-tête de chaque projet du tableau de bord, à côté de « Visualiser le lien » et « + Nouveau entreprise ». Une modale de confirmation s'ouvre, puis la copie complète du projet (toutes ses entreprises et toutes leurs données) est ajoutée en fin de liste.
+- Nouveau bouton « Copie » dans la colonne Actions du tableau des entreprises : il ouvre une modale « Copier vers… » où l'on saisit le nom de la copie et où l'on coche un ou plusieurs projets de destination. Le projet d'origine est une destination valide (duplication sur place). Choix assumé de ne pas faire de copier/coller en deux temps : un presse-papier applicatif serait invisible à l'écran et l'utilisateur perdrait la trace de ce qu'il a copié dès qu'il ferait autre chose.
+- **Règle de nommage harmonisée**, identique pour les projets et les entreprises : `Angovo` → `Angovo-copie`, puis `Angovo-copie(1)`, `(2)`… si le nom est déjà pris ; dupliquer `Angovo-copie` donne `Angovo-copie-copie`. Nouveau service `Service/CopyNameGenerator.php`. **Changement de comportement existant** : la duplication d'une entreprise produisait `Nom (copie)` et produit désormais `Nom-copie`.
+- Les entreprises d'un projet dupliqué **gardent leur nom d'origine** — le suffixe ne porte que sur le projet, sinon la copie d'`Angovo` contiendrait « Boulangerie Rabe-copie ».
+- **Correction importante du duplicateur existant** (`Manager/Company/DuplicateCompanyManager.php`), qui avait pris du retard sur le modèle et perdait silencieusement des données à chaque duplication — y compris avec le bouton « Dupliquer » déjà en production dans la vue cartes :
+  - `Company` : `descriptionActivite`, `marche`, `genre`, `modeleEconomique`, `etatActivite` n'étaient pas copiés (fiche d'identité vide, complétion faussée)
+  - `StaffMember` : `growthRates` (croissance salariale An 2-5) n'était pas copié — la masse salariale de la copie divergeait dès l'An 2
+  - `Investment` : `equipmentType` et `contributionType` n'étaient pas copiés — un apport en nature redevenait « financier » (valeur par défaut de la colonne) et le plan de financement était faussé
+  - `InvestmentTerrain` : `natureType` n'était pas copié
+  - le snapshot KPI était créé vide, la copie s'affichait à « 0 Ar / 0 % » sur le tableau de bord jusqu'à la première modification ; il reprend désormais les KPI de la source (données identiques, donc KPI identiques)
+  - un commentaire en tête du fichier rappelle que tout nouveau champ d'entité doit y être ajouté — c'est la troisième fois que ce fichier prend du retard sur le modèle
+- Le duplicateur accepte maintenant un projet cible, un nom souhaité et un flush différé, ce qui permet de le réutiliser pour les deux nouvelles fonctionnalités sans dupliquer sa logique.
+- **Permissions** : duplication de projet et copie d'entreprise réservées aux rôles **admin** et **manager**, contrôle appliqué **côté serveur** (`User::isCanDuplicateProject()`) et pas seulement en masquant les boutons. C'est nécessaire ici : `GET /api/projects` renvoie tous les projets à tout le monde et c'est le navigateur qui masque les entreprises qu'un rôle ne doit pas voir — sans garde-fou serveur, un utilisateur « standard » aurait copié des entreprises invisibles pour lui.
+- Les copies repartent en statut « En cours » (le statut validé et son signataire appartiennent à l'entreprise d'origine), et `créé par` / `modifié par` désignent la personne qui duplique.
+- **Nouvelle fonctionnalité — modification d'un projet** : icône crayon à côté du nom du projet, ouvrant une modale identique à celle de création pour changer le nom et la description (`components/dashboard/EditProjectModal.tsx`). L'endpoint `PUT /api/projects/{id}` existait déjà mais n'était accessible par aucune interface.
+- Nouveau composant `components/ui/ConfirmModal.tsx` : modale de confirmation aux couleurs de l'application (« Annuler » sur fond blanc bordure grise, action principale en `--color-primary`), avec indicateur d'attente — nécessaire car la duplication d'un projet de plusieurs entreprises n'est pas instantanée et un double clic créerait deux copies. Remplacera à terme les `confirm()` natifs des suppressions.
+- Les deux boutons sont **désactivés hors ligne** : la duplication crée trop d'objets liés pour être rejouée depuis la file de synchronisation.
+- Sérialisation extraite dans `Service/ProjectSerializer.php`, partagée par `GetProjectListController`, la duplication de projet et la copie d'entreprise : le front reçoit toujours la même forme et insère le résultat directement dans son état, sans recharger la liste. Au passage, `POST /api/companies/{id}/duplicate` renvoie désormais l'entreprise au format complet du tableau de bord (créateur, statut, KPI) au lieu d'une réponse partielle.
+- Nouveaux endpoints : `POST /api/projects/{id}/duplicate` et `POST /api/companies/{id}/copy` (corps `{ "targetProjectIds": [...], "name": "..." }`).
+- **Aucun impact base de données — aucune migration nécessaire.**
+
 ## 2026-07-27
 
 **Backend + Frontend — Correction d'un déséquilibre Actif/Passif dans le Bilan prévisionnel**

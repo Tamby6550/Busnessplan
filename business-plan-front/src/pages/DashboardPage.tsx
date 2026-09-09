@@ -9,7 +9,10 @@ import AppSidebar from '@/components/layout/AppSidebar'
 import ProjectCard from '@/components/dashboard/ProjectCard'
 import CreateProjectModal from '@/components/dashboard/CreateProjectModal'
 import CreateCompanyModal from '@/components/dashboard/CreateCompanyModal'
-import type { ProjectSummary } from '@/types'
+import EditProjectModal from '@/components/dashboard/EditProjectModal'
+import CopyCompanyModal from '@/components/dashboard/CopyCompanyModal'
+import ConfirmModal from '@/components/ui/ConfirmModal'
+import type { CompanySummary, ProjectSummary } from '@/types'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -25,6 +28,13 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
   const [createCompanyForProjectId, setCreateCompanyForProjectId] = useState<number | null>(null)
+  const [projectToDuplicate, setProjectToDuplicate] = useState<ProjectSummary | null>(null)
+  const [projectToEdit, setProjectToEdit] = useState<ProjectSummary | null>(null)
+  const [companyToCopy, setCompanyToCopy] = useState<{ company: CompanySummary; projectId: number } | null>(null)
+  const [isDuplicatingProject, setIsDuplicatingProject] = useState(false)
+  const [duplicateProjectError, setDuplicateProjectError] = useState<string | null>(null)
+  const [isCopyingCompany, setIsCopyingCompany] = useState(false)
+  const [copyCompanyError, setCopyCompanyError] = useState<string | null>(null)
 
   const [viewMode, setViewMode] = useState<'card' | 'table'>('table')
 
@@ -92,6 +102,52 @@ export default function DashboardPage() {
           : p,
       ),
     )
+  }
+
+  /**
+   * Duplication d'un projet entier.
+   * La copie est ajoutée en fin de liste, comme pour une création de projet.
+   */
+  async function handleConfirmDuplicateProject() {
+    if (!projectToDuplicate) return
+    setDuplicateProjectError(null)
+    setIsDuplicatingProject(true)
+    try {
+      const copy = await projectApi.duplicate(projectToDuplicate.id)
+      setProjects((prev) => [...prev, copy])
+      setProjectToDuplicate(null)
+    } catch {
+      setDuplicateProjectError("La duplication a échoué. Aucun projet n'a été créé.")
+    } finally {
+      setIsDuplicatingProject(false)
+    }
+  }
+
+  /** Copie d'une entreprise vers un ou plusieurs projets (le projet d'origine inclus). */
+  async function handleConfirmCopyCompany(targetProjectIds: number[], name: string) {
+    if (!companyToCopy) return
+    setCopyCompanyError(null)
+    setIsCopyingCompany(true)
+    try {
+      const results = await companyApi.copyToProjects(companyToCopy.company.id, targetProjectIds, name)
+      setProjects((prev) =>
+        prev.map((p) => {
+          const added = results.filter((r) => r.projectId === p.id).map((r) => r.company)
+          if (added.length === 0) return p
+          return { ...p, companies: [...p.companies, ...added], companyCount: p.companyCount + added.length }
+        }),
+      )
+      setCompanyToCopy(null)
+    } catch {
+      setCopyCompanyError('La copie a échoué. Aucune entreprise n\'a été copiée.')
+    } finally {
+      setIsCopyingCompany(false)
+    }
+  }
+
+  function handleProjectUpdated(id: number, name: string, description: string) {
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name, description } : p)))
+    setProjectToEdit(null)
   }
 
   function handleOpenEditor(companyId: number) {
@@ -234,6 +290,9 @@ export default function DashboardPage() {
               onAddCompany={() => setCreateCompanyForProjectId(project.id)}
               onDeleteCompany={(id) => handleDeleteCompany(id, project.id)}
               onDuplicateCompany={(id) => handleDuplicateCompany(id, project.id)}
+              onDuplicateProject={() => setProjectToDuplicate(project)}
+              onEditProject={() => setProjectToEdit(project)}
+              onCopyCompany={(company) => setCompanyToCopy({ company, projectId: project.id })}
               onValidateCompany={handleValidateCompany}
               onUnvalidateCompany={handleUnvalidateCompany}
             />
@@ -266,6 +325,42 @@ export default function DashboardPage() {
               )
               setCreateCompanyForProjectId(null)
             }}
+          />
+        )}
+
+        {/* Modal modification projet */}
+        {projectToEdit && (
+          <EditProjectModal
+            project={projectToEdit}
+            onClose={() => setProjectToEdit(null)}
+            onUpdated={handleProjectUpdated}
+          />
+        )}
+
+        {/* Modal confirmation duplication de projet */}
+        {projectToDuplicate && (
+          <ConfirmModal
+            title={`Dupliquer le projet « ${projectToDuplicate.name} » ?`}
+            message="Vous voulez dupliquer ce projet avec toutes les entreprises et les données des entreprises dans ce projet. Une copie complète sera créée, l'original reste inchangé."
+            confirmLabel="Dupliquer"
+            loadingLabel="Duplication…"
+            isLoading={isDuplicatingProject}
+            error={duplicateProjectError}
+            onCancel={() => { setProjectToDuplicate(null); setDuplicateProjectError(null) }}
+            onConfirm={handleConfirmDuplicateProject}
+          />
+        )}
+
+        {/* Modal copie d'entreprise vers d'autres projets */}
+        {companyToCopy && (
+          <CopyCompanyModal
+            company={companyToCopy.company}
+            sourceProjectId={companyToCopy.projectId}
+            projects={projects}
+            isLoading={isCopyingCompany}
+            error={copyCompanyError}
+            onCancel={() => { setCompanyToCopy(null); setCopyCompanyError(null) }}
+            onConfirm={handleConfirmCopyCompany}
           />
         )}
       </main>

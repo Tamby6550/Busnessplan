@@ -96,6 +96,11 @@ export const projectApi = {
       body: JSON.stringify({ name, description }),
     }),
 
+  duplicate: (id: number) =>
+    request<import('@/types').ProjectSummary>(`/projects/${id}/duplicate`, {
+      method: 'POST',
+    }),
+
   delete: (id: number) =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
 }
@@ -135,6 +140,17 @@ export const companyApi = {
   duplicate: (id: number) =>
     request<import('@/types').CompanySummary>(`/companies/${id}/duplicate`, {
       method: 'POST',
+    }),
+
+  /**
+   * Copie une entreprise vers un ou plusieurs projets.
+   * Le nom est celui saisi dans la modale ; le serveur y ajoute "(n)" si ce nom
+   * est déjà pris dans un des projets de destination.
+   */
+  copyToProjects: (id: number, targetProjectIds: number[], name: string) =>
+    request<{ projectId: number; company: import('@/types').CompanySummary }[]>(`/companies/${id}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ targetProjectIds, name }),
     }),
 
   delete: (id: number) =>

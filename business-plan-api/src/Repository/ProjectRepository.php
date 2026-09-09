@@ -52,4 +52,19 @@ class ProjectRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * Liste des noms de tous les projets — sert à calculer un nom de copie libre
+     * ("Angovo-copie", "Angovo-copie(1)"...) sans charger les entités.
+     * @return string[]
+     */
+    public function findAllNames(): array
+    {
+        $rows = $this->createQueryBuilder('p')
+            ->select('p.name')
+            ->getQuery()
+            ->getScalarResult();
+
+        return array_column($rows, 'name');
+    }
 }
